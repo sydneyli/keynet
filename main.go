@@ -18,6 +18,12 @@ import (
 	"flag"
 	"log"
 	"strings"
+
+	"github.com/coreos/pkg/capnslog"
+)
+
+var (
+	plog = capnslog.NewPackageLogger("github.com/sydli/distributePKI", "pkg/distributePKI")
 )
 
 func main() {
@@ -47,5 +53,5 @@ func main() {
 	kvs = newKVStore(raftNode)
 
 	// the key-value http handler will propose updates to raft
-	serveHttpKVAPI(kvs, raftNode, *kvport)
+	serveKeystoreHttpApi(Keystore{store: kvs}, raftNode, *kvport)
 }
