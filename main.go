@@ -16,9 +16,8 @@ package main
 
 import (
 	"flag"
+	"log"
 	"strings"
-
-	"github.com/coreos/etcd/raft/raftpb"
 )
 
 func main() {
@@ -28,18 +27,25 @@ func main() {
 	join := flag.Bool("join", false, "join an existing cluster")
 	flag.Parse()
 
-	proposeC := make(chan string)
-	defer close(proposeC)
-	confChangeC := make(chan raftpb.ConfChange)
-	defer close(confChangeC)
-
 	// raft provides a commit stream for the proposals from the http api
 	var kvs *kvstore
-	getSnapshot := func() ([]byte, error) { return kvs.getSnapshot() }
-	commitC, errorC, snapshotterReady := newRaftNode(*id, strings.Split(*cluster, ","), *join, getSnapshot, proposeC, confChangeC)
+	var checkpointFn = func() ([]byte, error) {
+		checkpoint, err := kvs.MakeCheckpoint()
+		byte_checkpoint, ok := checkpoint.([]byte)
+		if !ok {
+			log.Panic("Checkpoint not a []byte array")
+		}
+		return byte_checkpoint, err
+	}
+	raftNode, ready := newRaftNode(
+		*id,
+		strings.Split(*cluster, ","),
+		*join,
+		checkpointFn)
 
-	kvs = newKVStore(<-snapshotterReady, proposeC, commitC, errorC)
+	<-ready
+	kvs = newKVStore(raftNode)
 
 	// the key-value http handler will propose updates to raft
-	serveHttpKVAPI(kvs, *kvport, confChangeC, errorC)
+	serveHttpKVAPI(kvs, raftNode, *kvport)
 }

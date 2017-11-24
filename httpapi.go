@@ -25,8 +25,8 @@ import (
 
 // Handler for a http based key-value store backed by raft
 type httpKVAPI struct {
-	store       *kvstore
-	confChangeC chan<- raftpb.ConfChange
+	store         DistributedStore
+	consensusNode ConsensusNode
 }
 
 func (h *httpKVAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -40,13 +40,13 @@ func (h *httpKVAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		h.store.Propose(key, string(v))
+		h.store.Put(key, string(v))
 
 		// Optimistic-- no waiting for ack from raft. Value is not yet
 		// committed so a subsequent GET on the key may return old value
 		w.WriteHeader(http.StatusNoContent)
 	case r.Method == "GET":
-		if v, ok := h.store.Lookup(key); ok {
+		if v, ok := h.store.Get(key); ok {
 			w.Write([]byte(v))
 		} else {
 			http.Error(w, "Failed to GET", http.StatusNotFound)
@@ -71,7 +71,7 @@ func (h *httpKVAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			NodeID:  nodeId,
 			Context: url,
 		}
-		h.confChangeC <- cc
+		h.consensusNode.ConfigChange(cc)
 
 		// As above, optimistic that raft will apply the conf change
 		w.WriteHeader(http.StatusNoContent)
@@ -87,7 +87,7 @@ func (h *httpKVAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Type:   raftpb.ConfChangeRemoveNode,
 			NodeID: nodeId,
 		}
-		h.confChangeC <- cc
+		h.consensusNode.ConfigChange(cc)
 
 		// As above, optimistic that raft will apply the conf change
 		w.WriteHeader(http.StatusNoContent)
@@ -101,12 +101,12 @@ func (h *httpKVAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveHttpKVAPI starts a key-value server with a GET/PUT API and listens.
-func serveHttpKVAPI(kv *kvstore, port int, confChangeC chan<- raftpb.ConfChange, errorC <-chan error) {
+func serveHttpKVAPI(kv DistributedStore, node ConsensusNode, port int) {
 	srv := http.Server{
 		Addr: ":" + strconv.Itoa(port),
 		Handler: &httpKVAPI{
-			store:       kv,
-			confChangeC: confChangeC,
+			store:         kv,
+			consensusNode: node,
 		},
 	}
 	go func() {
@@ -116,7 +116,7 @@ func serveHttpKVAPI(kv *kvstore, port int, confChangeC chan<- raftpb.ConfChange,
 	}()
 
 	// exit when raft goes down
-	if err, ok := <-errorC; ok {
+	if err, ok := <-node.Failure(); ok {
 		log.Fatal(err)
 	}
 }
