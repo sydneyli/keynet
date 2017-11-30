@@ -1,4 +1,4 @@
-package main
+package common
 
 type DistributedStore interface {
 	Put(key, value string)

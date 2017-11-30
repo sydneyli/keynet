@@ -1,8 +1,15 @@
-package main
+package keystore
 
 import (
+	"distributepki/common"
 	"fmt"
 	"time"
+
+	"github.com/coreos/pkg/capnslog"
+)
+
+var (
+	plog = capnslog.NewPackageLogger("github.com/sydli/distributePKI", "keystore")
 )
 
 type Alias string
@@ -10,17 +17,19 @@ type Signature string
 type Key string
 
 type KeyUpdate struct {
-	alias Alias
-	key Key
+	alias      Alias
+	key        Key
 	expiration time.Time
 }
 
 type AliasNotFoundError string
+
 func (e AliasNotFoundError) Error() string {
 	return fmt.Sprintf("Alias '%v' not found.", string(e))
 }
 
 type AliasAlreadyExists string
+
 func (e AliasAlreadyExists) Error() string {
 	return fmt.Sprintf("Alias '%v' already exists.", string(e))
 }
@@ -29,20 +38,25 @@ type SignatureMismatch struct {
 	update KeyUpdate
 	oldKey Key
 }
+
 func (e SignatureMismatch) Error() string {
 	return "Signature Mismatch"
 }
 
 // Public Key Store backed by DistributedStore
 type Keystore struct {
-	store         DistributedStore
+	store common.DistributedStore
+}
+
+func NewKeystore(s common.DistributedStore) Keystore {
+	return Keystore{store: s}
 }
 
 func (ks *Keystore) CreateKey(alias Alias, key Key) error {
 	if _, ok := ks.store.Get(string(alias)); ok {
 		return AliasAlreadyExists(alias)
 	}
-	// TODO: make sure that key is valid key format here 
+	// TODO: make sure that key is valid key format here
 	plog.Infof("Create Key: %v for Alias: %v", key, alias)
 	ks.store.Put(string(alias), string(key))
 	return nil

@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package keystore
 
 import (
+	"distributepki/common"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -25,8 +26,8 @@ import (
 
 // Handler for a http based key-value store backed by raft
 type httpKVAPI struct {
-	store         DistributedStore
-	consensusNode ConsensusNode
+	store         common.DistributedStore
+	consensusNode common.ConsensusNode
 }
 
 func (h *httpKVAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +102,7 @@ func (h *httpKVAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveHttpKVAPI starts a key-value server with a GET/PUT API and listens.
-func serveHttpKVAPI(kv DistributedStore, node ConsensusNode, port int) {
+func serveHttpKVAPI(kv common.DistributedStore, node common.ConsensusNode, port int) {
 	srv := http.Server{
 		Addr: ":" + strconv.Itoa(port),
 		Handler: &httpKVAPI{

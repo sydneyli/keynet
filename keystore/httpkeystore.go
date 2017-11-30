@@ -1,8 +1,8 @@
-package main
+package keystore
 
 import (
+	"distributepki/common"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"strconv"
 
@@ -10,19 +10,19 @@ import (
 )
 
 // Handler for a http based keystore
-type httpKeystoreAPI struct {
-	keystore         Keystore
-	consensusNode    ConsensusNode
+type HttpKeystoreAPI struct {
+	keystore      Keystore
+	consensusNode common.ConsensusNode
 }
 
-func (h *httpKeystoreAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *HttpKeystoreAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	pathParam := string(r.RequestURI)[1:]
 	switch {
 	case r.Method == "PUT":
 		alias := Alias(pathParam)
 		val, err := ioutil.ReadAll(r.Body)
 		if err != nil {
-			log.Printf("Failed to read on PUT (%v)\n", err)
+			plog.Printf("Failed to read on PUT (%v)\n", err)
 			http.Error(w, "Failed on PUT", http.StatusBadRequest)
 			return
 		}
@@ -43,14 +43,14 @@ func (h *httpKeystoreAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "POST":
 		url, err := ioutil.ReadAll(r.Body)
 		if err != nil {
-			log.Printf("Failed to read on POST (%v)\n", err)
+			plog.Printf("Failed to read on POST (%v)\n", err)
 			http.Error(w, "Failed on POST", http.StatusBadRequest)
 			return
 		}
 
 		nodeId, err := strconv.ParseUint(pathParam, 0, 64)
 		if err != nil {
-			log.Printf("Failed to convert ID for conf change (%v)\n", err)
+			plog.Printf("Failed to convert ID for conf change (%v)\n", err)
 			http.Error(w, "Failed on POST", http.StatusBadRequest)
 			return
 		}
@@ -67,7 +67,7 @@ func (h *httpKeystoreAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "DELETE":
 		nodeId, err := strconv.ParseUint(pathParam, 0, 64)
 		if err != nil {
-			log.Printf("Failed to convert ID for conf change (%v)\n", err)
+			plog.Printf("Failed to convert ID for conf change (%v)\n", err)
 			http.Error(w, "Failed on DELETE", http.StatusBadRequest)
 			return
 		}
@@ -89,22 +89,22 @@ func (h *httpKeystoreAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func serveKeystoreHttpApi(keystore Keystore, node ConsensusNode, port int) {
+func ServeKeystoreHttpApi(keystore Keystore, node common.ConsensusNode, port int) {
 	srv := http.Server{
 		Addr: ":" + strconv.Itoa(port),
-		Handler: &httpKeystoreAPI{
-			keystore:         keystore,
+		Handler: &HttpKeystoreAPI{
+			keystore:      keystore,
 			consensusNode: node,
 		},
 	}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil {
-			log.Fatal(err)
+			plog.Fatal(err)
 		}
 	}()
 
 	// exit when raft goes down
 	if err, ok := <-node.Failure(); ok {
-		log.Fatal(err)
+		plog.Fatal(err)
 	}
 }

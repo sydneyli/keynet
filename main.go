@@ -15,15 +15,16 @@
 package main
 
 import (
+	"distributepki/etcdraft"
+	"distributepki/keystore"
 	"flag"
-	"log"
 	"strings"
 
 	"github.com/coreos/pkg/capnslog"
 )
 
 var (
-	plog = capnslog.NewPackageLogger("github.com/sydli/distributePKI", "pkg/distributePKI")
+	log = capnslog.NewPackageLogger("github.com/sydli/distributePKI", "main")
 )
 
 func main() {
@@ -34,7 +35,7 @@ func main() {
 	flag.Parse()
 
 	// raft provides a commit stream for the proposals from the http api
-	var kvs *kvstore
+	var kvs *keystore.Kvstore
 	var checkpointFn = func() ([]byte, error) {
 		checkpoint, err := kvs.MakeCheckpoint()
 		byte_checkpoint, ok := checkpoint.([]byte)
@@ -43,15 +44,15 @@ func main() {
 		}
 		return byte_checkpoint, err
 	}
-	raftNode, ready := newRaftNode(
+	raftNode, ready := etcdraft.NewRaftNode(
 		*id,
 		strings.Split(*cluster, ","),
 		*join,
 		checkpointFn)
 
 	<-ready
-	kvs = newKVStore(raftNode)
+	kvs = keystore.NewKVStore(raftNode)
 
 	// the key-value http handler will propose updates to raft
-	serveKeystoreHttpApi(Keystore{store: kvs}, raftNode, *kvport)
+	keystore.ServeKeystoreHttpApi(keystore.NewKeystore(kvs), raftNode, *kvport)
 }

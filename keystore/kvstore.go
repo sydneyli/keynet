@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package main
+package keystore
 
 import (
 	"bytes"
+	"distributepki/common"
 	"encoding/gob"
 	"encoding/json"
 	"log"
@@ -26,10 +27,10 @@ import (
 )
 
 // a key-value store backed by raft
-type kvstore struct {
+type Kvstore struct {
 	mu            sync.RWMutex
 	kvStore       map[string]string // current committed key-value pairs
-	consensusNode ConsensusNode
+	consensusNode common.ConsensusNode
 }
 
 type kv struct {
@@ -37,8 +38,8 @@ type kv struct {
 	Val string
 }
 
-func newKVStore(node ConsensusNode) *kvstore {
-	s := &kvstore{kvStore: make(map[string]string), consensusNode: node}
+func NewKVStore(node common.ConsensusNode) *Kvstore {
+	s := &Kvstore{kvStore: make(map[string]string), consensusNode: node}
 	// replay log into key-value map
 	s.readCommits(node)
 	// read commits from raft into kvStore map until error
@@ -46,14 +47,14 @@ func newKVStore(node ConsensusNode) *kvstore {
 	return s
 }
 
-func (s *kvstore) Get(key string) (string, bool) {
+func (s *Kvstore) Get(key string) (string, bool) {
 	s.mu.RLock()
 	v, ok := s.kvStore[key]
 	s.mu.RUnlock()
 	return v, ok
 }
 
-func (s *kvstore) Put(k, v string) {
+func (s *Kvstore) Put(k, v string) {
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(kv{k, v}); err != nil {
 		log.Fatal(err)
@@ -61,7 +62,7 @@ func (s *kvstore) Put(k, v string) {
 	s.consensusNode.Propose(buf.String())
 }
 
-func (s *kvstore) readCommits(node ConsensusNode) {
+func (s *Kvstore) readCommits(node common.ConsensusNode) {
 	for data := range node.Committed() {
 		if data == nil {
 			// done replaying log; new data incoming
@@ -99,17 +100,17 @@ func (s *kvstore) readCommits(node ConsensusNode) {
 	}
 }
 
-func (s *kvstore) MakeCheckpoint() (interface{}, error) {
+func (s *Kvstore) MakeCheckpoint() (interface{}, error) {
 	return s.getSnapshot()
 }
 
-func (s *kvstore) getSnapshot() ([]byte, error) {
+func (s *Kvstore) getSnapshot() ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return json.Marshal(s.kvStore)
 }
 
-func (s *kvstore) recoverFromSnapshot(snapshot []byte) error {
+func (s *Kvstore) recoverFromSnapshot(snapshot []byte) error {
 	var store map[string]string
 	if err := json.Unmarshal(snapshot, &store); err != nil {
 		return err
