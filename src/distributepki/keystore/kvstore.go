@@ -38,12 +38,17 @@ type kv struct {
 	Val string
 }
 
-func NewKVStore(node common.ConsensusNode) *Kvstore {
-	s := &Kvstore{kvStore: make(map[string]string), consensusNode: node}
+func NewKVStore(node common.ConsensusNode, initialStore map[string]string) *Kvstore {
+	if initialStore == nil {
+		initialStore = make(map[string]string)
+	}
+	s := &Kvstore{kvStore: initialStore, consensusNode: node}
+
+	// XXX: this is necessary for Raft, but not PBFT right now, fix it to work with both
 	// replay log into key-value map
-	s.readCommits(node)
-	// read commits from raft into kvStore map until error
-	go s.readCommits(node)
+	// s.readCommits(node)
+	// read commits from cluster into kvStore map until error
+	// go s.readCommits(node)
 	return s
 }
 

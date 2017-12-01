@@ -52,4 +52,11 @@ Finally, to start up the cluster of `n` nodes, run `n` instances of
 ```
 ./distributepki --id i
 ```
+## Client usage
+
+Currently, to look up a key initially inserted into the table, run the
+following curl command:
+```
+curl -L http://localhost:<cluster node HTTP port>/<desired key>
+```
 

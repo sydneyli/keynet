@@ -90,6 +90,7 @@ func (h *HttpKeystoreAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func ServeKeystoreHttpApi(keystore Keystore, node common.ConsensusNode, port int) {
+	plog.Info(":" + strconv.Itoa(port))
 	srv := http.Server{
 		Addr: ":" + strconv.Itoa(port),
 		Handler: &HttpKeystoreAPI{
@@ -103,7 +104,7 @@ func ServeKeystoreHttpApi(keystore Keystore, node common.ConsensusNode, port int
 		}
 	}()
 
-	// exit when raft goes down
+	// exit when consensus cluster goes down
 	if err, ok := <-node.Failure(); ok {
 		plog.Fatal(err)
 	}

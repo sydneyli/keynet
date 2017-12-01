@@ -15,8 +15,8 @@
 package main
 
 import (
-	//"distributepki/etcdraft"
-	//"distributepki/keystore"
+	"distributepki/common"
+	"distributepki/keystore"
 	//"distributepki/pbft"
 	"flag"
 	"pbft"
@@ -41,18 +41,18 @@ func logFatal(e error) {
 func main() {
 	//cluster := flag.String("cluster", "http://127.0.0.1:9021", "comma separated cluster peers")
 	id := flag.Int("id", 1, "Node ID to start")
-	//kvport := flag.Int("port", 9121, "key-value server port")
+	kvport := flag.Int("port", 9121, "HTTP server port")
 	//join := flag.Bool("join", false, "join an existing cluster")
-	config_file := flag.String("config", "cluster.json", "PBFT configuration file")
-	keystore_file := flag.String("keys", "keys.json", "Initial keys in store")
+	configFile := flag.String("config", "cluster.json", "PBFT configuration file")
+	keystoreFile := flag.String("keys", "keys.json", "Initial keys in store")
 	flag.Parse()
 
-	log.Infof("Reading cluster configuration from %s...", *config_file)
-	config_data, err := ioutil.ReadFile(*config_file)
+	log.Infof("Reading cluster configuration from %s...", *configFile)
+	configData, err := ioutil.ReadFile(*configFile)
 	logFatal(err)
 
 	var config pbft.ClusterConfig
-	err = json.Unmarshal(config_data, &config)
+	err = json.Unmarshal(configData, &config)
 	logFatal(err)
 
 	var thisNode pbft.NodeConfig
@@ -66,58 +66,51 @@ func main() {
 		}
 	}
 
-	log.Infof("Reading initial keys from %s...", *keystore_file)
+	log.Infof("Reading initial keys from %s...", *keystoreFile)
 
-	key_data, err := ioutil.ReadFile(*keystore_file)
+	keyData, err := ioutil.ReadFile(*keystoreFile)
 	logFatal(err)
 
-	var initial_keys []pbft.KeyPair
-	err = json.Unmarshal(key_data, &initial_keys)
+	var initialKeys []pbft.KeyPair
+	err = json.Unmarshal(keyData, &initialKeys)
 	logFatal(err)
 
 	for _, n := range config.Nodes {
-		initial_keys = append(initial_keys, pbft.KeyPair{Key: n.Key, Alias: n.Hostname})
+		initialKeys = append(initialKeys, pbft.KeyPair{Key: n.Key, Alias: n.Hostname})
 	}
 
-	for _, kp := range initial_keys {
+	initialKeyTable := make(map[string]string)
+	for _, kp := range initialKeys {
+		initialKeyTable[string(kp.Alias)] = string(kp.Key)
 		log.Infof("    %v => %v", kp.Alias, kp.Key)
 	}
 
 	log.Infof("Starting node %d (%s)...", *id, thisNode.Hostname)
 
-	ready := make(chan bool)
+	ready := make(chan common.ConsensusNode)
 	go pbft.StartNode(thisNode, config, ready)
 
-	if <-ready {
+	node := <-ready
+	if node != nil {
 		log.Info("Node started successfully!")
 	} else {
 		log.Fatal("Node/cluster failed to start.")
 	}
 
-	for true {
-	}
-
-	/*
-		// raft provides a commit stream for the proposals from the http api
-		var kvs *keystore.Kvstore
-		var checkpointFn = func() ([]byte, error) {
-			checkpoint, err := kvs.MakeCheckpoint()
-			byte_checkpoint, ok := checkpoint.([]byte)
-			if !ok {
-				log.Panic("Checkpoint not a []byte array")
-			}
-			return byte_checkpoint, err
+	/* // Unneeded for now
+	var checkpointFn = func() ([]byte, error) {
+		checkpoint, err := kvs.MakeCheckpoint()
+		byte_checkpoint, ok := checkpoint.([]byte)
+		if !ok {
+			log.Panic("Checkpoint not a []byte array")
 		}
-		raftNode, ready := etcdraft.NewRaftNode(
-			*id,
-			strings.Split(*cluster, ","),
-			*join,
-			checkpointFn)
-
-		<-ready
-		kvs = keystore.NewKVStore(raftNode)
-
-		// the key-value http handler will propose updates to raft
-		keystore.ServeKeystoreHttpApi(keystore.NewKeystore(kvs), raftNode, *kvport)
+		return byte_checkpoint, err
+	}
 	*/
+
+	log.Info("hsdfelldasf")
+	store := keystore.NewKeystore(keystore.NewKVStore(node, initialKeyTable))
+	log.Info("helldasf")
+	keystore.ServeKeystoreHttpApi(store, node, *kvport)
+	log.Info("hellsdfa")
 }
