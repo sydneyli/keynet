@@ -1,4 +1,5 @@
 raftexample-*/
-distributepki
 raftexample
 *.json
+bin
+pkg
