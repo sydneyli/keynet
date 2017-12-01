@@ -17,8 +17,9 @@ package main
 import (
 	//"distributepki/etcdraft"
 	//"distributepki/keystore"
-	"distributepki/pbft"
+	//"distributepki/pbft"
 	"flag"
+	"pbft"
 	//"fmt"
 	//"strings"
 	"encoding/json"

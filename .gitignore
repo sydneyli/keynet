@@ -3,3 +3,5 @@ raftexample
 *.json
 bin
 pkg
+github.com
+distributepki

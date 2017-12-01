@@ -1,4 +1,4 @@
-package main
+package pbft
 
 import (
 	"net"
@@ -9,8 +9,8 @@ import (
 // op, timestamp, client addr (signed by client)
 type ClientRequest struct {
 	op        string
-	timestamp Time
-	client    Addr
+	timestamp time.Time
+	client    net.Addr
 }
 
 // REPLY:
@@ -19,9 +19,9 @@ type ClientRequest struct {
 type ClientReply struct {
 	result     string
 	viewNumber int
-	timestamp  Time
-	client     Addr
-	node       Addr
+	timestamp  time.Time
+	client     net.Addr
+	node       net.Addr
 }
 
 // PRE-PREPARE:
@@ -40,7 +40,7 @@ type Prepare struct {
 	viewNumber int
 	seqNumber  int
 	message    ClientRequest
-	node       Addr
+	node       net.Addr
 }
 
 // COMMIT:
@@ -50,7 +50,7 @@ type Commit struct {
 	viewNumber int
 	seqNumber  int
 	message    ClientRequest
-	node       Addr
+	node       net.Addr
 }
 
 type Ack struct {
@@ -59,22 +59,22 @@ type Ack struct {
 
 type Message int
 
-func (t *Message) ClientMessage(request *ClientRequest, reply *ClientReply) {
+func (t *Message) ClientMessage(request *ClientRequest, reply *ClientReply) error {
 	// TODO implement
 	return nil
 }
 
-func (t *Message) PrePrepare(data *PrePrepare, reply *Ack) {
+func (t *Message) PrePrepare(data *PrePrepare, reply *Ack) error {
 	// TODO implement
 	return nil
 }
 
-func (t *Message) Prepare(data *Prepare, reply *Ack) {
+func (t *Message) Prepare(data *Prepare, reply *Ack) error {
 	// TODO implement
 	return nil
 }
 
-func (t *Message) Commit(data *Commit, reply *Ack) {
+func (t *Message) Commit(data *Commit, reply *Ack) error {
 	// TODO implement
 	return nil
 }
