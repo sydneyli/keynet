@@ -18,7 +18,6 @@ import (
 	"distributepki/common"
 	"distributepki/keystore"
 	"encoding/json"
-	"errors"
 	"flag"
 	"io/ioutil"
 	"net"
@@ -42,19 +41,12 @@ func logFatal(e error) {
 func main() {
 	configFile := flag.String("config", "cluster.json", "PBFT configuration file")
 
-	pbftNode := flag.Bool("node", true, "Start full PBFT node")
+	pbftNode := flag.Bool("node", true, "[true] Start full PBFT node; [false] Start client")
 	id := flag.Int("id", 1, "Node ID to start")
 	keystoreFile := flag.String("keys", "keys.json", "Initial keys in store")
-
-	client := flag.Bool("client", false, "Should start HTTP client interface")
 	clientport := flag.Int("clientport", 9121, "HTTP server port")
 
 	flag.Parse()
-
-	if *pbftNode && *client {
-		logFatal(errors.New("Client and PBFT node should not be running on the same node"))
-		return
-	}
 
 	log.Infof("Reading cluster configuration from %s...", *configFile)
 	configData, err := ioutil.ReadFile(*configFile)
@@ -117,7 +109,9 @@ func main() {
 			go http.Serve(l, nil)
 		}
 
-	} else if *client {
+		<-node.Failure()
+
+	} else {
 		var primary pbft.NodeConfig
 		for _, n := range config.Nodes {
 			if n.Id == config.Primary.Id {

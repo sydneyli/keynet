@@ -75,12 +75,13 @@ func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- common.Conse
 
 	if node.primary {
 		for i := 0; i < len(cluster.Nodes)-1; i++ {
+			log.Infof("hi %d", i)
 			<-node.startup
 		}
 		go node.handleRequests()
 	} else {
-		go node.handlePrePrepares()
 		node.signalReady(cluster)
+		go node.handlePrePrepares()
 	}
 	ready <- node
 }
@@ -178,7 +179,10 @@ func (n PBFTNode) signalReady(cluster ClusterConfig) {
 	}
 
 	message := ReadyMsg(cluster.Primary.Id)
-	sendRPC(common.GetHostname(primary.Host, primary.Port), "PBFTNode.Ready", &message, new(ReadyResp), -1)
+	err := sendRPC(common.GetHostname(primary.Host, primary.Port), "PBFTNode.Ready", &message, new(ReadyResp), -1)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 func (n *PBFTNode) Ready(req *ReadyMsg, res *ReadyResp) error {
@@ -206,7 +210,7 @@ func bcastRPC(peers []string, rpcName string, message interface{}, response []in
 func sendRPC(hostName string, rpcName string, message interface{}, response interface{}, retries int) error {
 
 	rpcClient, err := rpc.DialHTTPPath("tcp", hostName, "/pbft")
-	for nRetries := 0; err != nil && (retries == -1 || retries < nRetries); nRetries++ {
+	for nRetries := 0; err != nil && retries < nRetries; nRetries++ {
 		rpcClient, err = rpc.DialHTTPPath("tcp", hostName, "/pbft")
 	}
 	if err != nil {
