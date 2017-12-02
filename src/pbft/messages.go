@@ -30,7 +30,11 @@ type ClientReply struct {
 type PrePrepare struct {
 	viewNumber int
 	seqNumber  int
-	message    ClientRequest
+}
+
+type PrePrepareFull struct {
+	pp      PrePrepare
+	message ClientRequest
 }
 
 // PREPARE:

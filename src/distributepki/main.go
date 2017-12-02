@@ -17,13 +17,14 @@ package main
 import (
 	"distributepki/common"
 	"distributepki/keystore"
-	//"distributepki/pbft"
-	"flag"
-	"pbft"
-	//"fmt"
-	//"strings"
 	"encoding/json"
+	"errors"
+	"flag"
 	"io/ioutil"
+	"net"
+	"net/http"
+	"net/rpc"
+	"pbft"
 
 	"github.com/coreos/pkg/capnslog"
 )
@@ -39,13 +40,21 @@ func logFatal(e error) {
 }
 
 func main() {
-	//cluster := flag.String("cluster", "http://127.0.0.1:9021", "comma separated cluster peers")
-	id := flag.Int("id", 1, "Node ID to start")
-	kvport := flag.Int("port", 9121, "HTTP server port")
-	//join := flag.Bool("join", false, "join an existing cluster")
 	configFile := flag.String("config", "cluster.json", "PBFT configuration file")
+
+	pbftNode := flag.Bool("node", true, "Start full PBFT node")
+	id := flag.Int("id", 1, "Node ID to start")
 	keystoreFile := flag.String("keys", "keys.json", "Initial keys in store")
+
+	client := flag.Bool("client", false, "Should start HTTP client interface")
+	clientport := flag.Int("clientport", 9121, "HTTP server port")
+
 	flag.Parse()
+
+	if *pbftNode && *client {
+		logFatal(errors.New("Client and PBFT node should not be running on the same node"))
+		return
+	}
 
 	log.Infof("Reading cluster configuration from %s...", *configFile)
 	configData, err := ioutil.ReadFile(*configFile)
@@ -55,62 +64,68 @@ func main() {
 	err = json.Unmarshal(configData, &config)
 	logFatal(err)
 
-	var thisNode pbft.NodeConfig
-	for _, n := range config.Nodes {
-		log.Infof("    [Node %d] %s", n.Id, n.Hostname)
-		if n.Primary {
-			log.Infof("        **PRIMARY**")
+	var store keystore.Keystore
+	if *pbftNode {
+
+		var thisNode pbft.NodeConfig
+		for _, n := range config.Nodes {
+			if n.Id == *id {
+				thisNode = n
+			}
 		}
-		if n.Id == *id {
-			thisNode = n
+
+		log.Infof("Reading initial keys from %s...", *keystoreFile)
+
+		keyData, err := ioutil.ReadFile(*keystoreFile)
+		logFatal(err)
+
+		var initialKeys []pbft.KeyPair
+		err = json.Unmarshal(keyData, &initialKeys)
+		logFatal(err)
+
+		for _, n := range config.Nodes {
+			initialKeys = append(initialKeys, pbft.KeyPair{Key: n.Key, Alias: common.GetHostname(n.Host, n.Port)})
 		}
-	}
 
-	log.Infof("Reading initial keys from %s...", *keystoreFile)
-
-	keyData, err := ioutil.ReadFile(*keystoreFile)
-	logFatal(err)
-
-	var initialKeys []pbft.KeyPair
-	err = json.Unmarshal(keyData, &initialKeys)
-	logFatal(err)
-
-	for _, n := range config.Nodes {
-		initialKeys = append(initialKeys, pbft.KeyPair{Key: n.Key, Alias: n.Hostname})
-	}
-
-	initialKeyTable := make(map[string]string)
-	for _, kp := range initialKeys {
-		initialKeyTable[string(kp.Alias)] = string(kp.Key)
-		log.Infof("    %v => %v", kp.Alias, kp.Key)
-	}
-
-	log.Infof("Starting node %d (%s)...", *id, thisNode.Hostname)
-
-	ready := make(chan common.ConsensusNode)
-	go pbft.StartNode(thisNode, config, ready)
-
-	node := <-ready
-	if node != nil {
-		log.Info("Node started successfully!")
-	} else {
-		log.Fatal("Node/cluster failed to start.")
-	}
-
-	/* // Unneeded for now
-	var checkpointFn = func() ([]byte, error) {
-		checkpoint, err := kvs.MakeCheckpoint()
-		byte_checkpoint, ok := checkpoint.([]byte)
-		if !ok {
-			log.Panic("Checkpoint not a []byte array")
+		initialKeyTable := make(map[string]string)
+		for _, kp := range initialKeys {
+			initialKeyTable[string(kp.Alias)] = string(kp.Key)
+			log.Infof("    %v => %v", kp.Alias, kp.Key)
 		}
-		return byte_checkpoint, err
-	}
-	*/
 
-	log.Info("hsdfelldasf")
-	store := keystore.NewKeystore(keystore.NewKVStore(node, initialKeyTable))
-	log.Info("helldasf")
-	keystore.ServeKeystoreHttpApi(store, node, *kvport)
-	log.Info("hellsdfa")
+		log.Infof("Starting node %d (%s)...", *id, common.GetHostname(thisNode.Host, thisNode.Port))
+
+		ready := make(chan common.ConsensusNode)
+		go pbft.StartNode(thisNode, config, ready)
+
+		node := <-ready
+		if node != nil {
+			log.Info("Node started successfully!")
+		} else {
+			log.Fatal("Node/cluster failed to start.")
+		}
+		store = keystore.NewKeystore(keystore.NewKVStore(node, initialKeyTable))
+
+		if config.Primary.Id == thisNode.Id {
+			rpc.Register(&store)
+			server := rpc.NewServer()
+			server.HandleHTTP("/public", "/dbg1")
+			l, e := net.Listen("tcp", common.GetHostname("", config.Primary.RpcPort))
+			if e != nil {
+				log.Fatal("listen error:", e)
+			}
+			go http.Serve(l, nil)
+		}
+
+	} else if *client {
+		var primary pbft.NodeConfig
+		for _, n := range config.Nodes {
+			if n.Id == config.Primary.Id {
+				primary = n
+				break
+			}
+		}
+
+		keystore.ServeKeystoreHttpApi(primary.Host, config.Primary.RpcPort, *clientport)
+	}
 }

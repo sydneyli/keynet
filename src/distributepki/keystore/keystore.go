@@ -93,3 +93,48 @@ func verifyKeyUpdate(update KeyUpdate, oldKey Key) bool {
 	// TODO: check signature here using old key
 	return true
 }
+
+// RPCs
+type CreateRequest struct {
+	alias Alias
+	key   Key
+}
+
+type UpdateRequest struct {
+	alias  Alias
+	update KeyUpdate
+}
+
+type LookupRequest struct {
+	alias Alias
+}
+
+type Ack struct {
+	success bool
+}
+
+type LookupAck struct {
+	success bool
+	key     Key
+}
+
+func (ks *Keystore) CreateKeyRemote(args *CreateRequest, reply *Ack) error {
+	err := ks.CreateKey(args.alias, args.key)
+	reply.success = err == nil
+	return err
+}
+
+func (ks *Keystore) UpdateKeyRemote(args *UpdateRequest, reply *Ack) error {
+	err := ks.UpdateKey(args.alias, args.update)
+	reply.success = err == nil
+	return err
+}
+
+func (ks *Keystore) LookupKeyRemote(args *LookupRequest, reply *LookupAck) error {
+	key, err := ks.LookupKey(args.alias)
+	reply.success = err == nil
+	if reply.success {
+		reply.key = key
+	}
+	return err
+}
