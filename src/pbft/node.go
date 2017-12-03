@@ -28,7 +28,8 @@ type PBFTNode struct {
 
 	errorChannel      chan error
 	requestChannel    chan *ClientRequest
-	preprepareChannel chan bool
+	preprepareChannel chan *PrePrepareFull
+	prepareChannel    chan *Prepare
 	committedChannel  chan *string
 
 	log        map[LogId]LogEntry
@@ -57,7 +58,8 @@ func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- common.Conse
 		startup:           make(chan bool, len(cluster.Nodes)-1),
 		errorChannel:      make(chan error),
 		requestChannel:    make(chan *ClientRequest, 10), // some nice inherent rate limiting
-		preprepareChannel: make(chan bool),
+		preprepareChannel: make(chan *PrePrepareFull),
+		prepareChannel:    make(chan *Prepare),
 		committedChannel:  make(chan *string),
 		log:               make(map[LogId]LogEntry),
 		viewNumber:        0,
@@ -115,53 +117,87 @@ func (n PBFTNode) GetCheckpoint() (interface{}, error) {
 	return nil, nil
 }
 
+// does appropriate actions after receivin a client request
+// i.e. send out preprepares and stuff
+func (n PBFTNode) handleClientRequest(request *ClientRequest) {
+	if request == nil {
+		return
+	}
+
+	id := LogId{
+		viewNumber: n.viewNumber,
+		seqNumber:  n.seqNumber,
+	}
+	n.seqNumber += 1
+
+	pp := PrePrepare{
+		viewNumber: id.viewNumber,
+		seqNumber:  id.seqNumber,
+	}
+	fullMessage := PrePrepareFull{
+		message: *request,
+		pp:      pp,
+	}
+
+	n.log[id] = LogEntry{
+		request:    request,
+		preprepare: pp,
+	}
+
+	responses := make([]interface{}, len(n.peers))
+	for i := 0; i < len(n.peers); i++ {
+		responses[i] = Ack{}
+	}
+	log.Infof("Sending PrePrepare messages for %+v", id)
+	bcastRPC(n.peers, "PBFTNode.PrePrepare", &fullMessage, responses, 10)
+
+	for i, r := range responses {
+		log.Infof("PrePrepare response %d: %+v", i, r)
+	}
+}
+
 // ** Remote Calls ** //
 func (n PBFTNode) handleRequests() {
 	requestC := n.requestChannel
 	for {
 		request := <-requestC
-		if request == nil {
-			break
-		}
+		n.handleClientRequest(request)
+	}
+}
 
-		id := LogId{
-			viewNumber: n.viewNumber,
-			seqNumber:  n.seqNumber,
-		}
-		n.seqNumber += 1
-
-		pp := PrePrepare{
-			viewNumber: id.viewNumber,
-			seqNumber:  id.seqNumber,
-		}
-		fullMessage := PrePrepareFull{
-			message: *request,
-			pp:      pp,
-		}
-
-		n.log[id] = LogEntry{
-			request:    request,
-			preprepare: pp,
-		}
-
-		responses := make([]interface{}, len(n.peers))
-		for i := 0; i < len(n.peers); i++ {
-			responses[i] = Ack{}
-		}
-		log.Infof("Sending PrePrepare messages for %+v", id)
-		bcastRPC(n.peers, "PBFTNode.PrePrepare", &fullMessage, responses, 10)
-
-		for i, r := range responses {
-			log.Infof("PrePrepare response %d: %+v", i, r)
+func (n PBFTNode) handleMessages() {
+	for {
+		select {
+		case msg := <-n.preprepareChannel:
+			if !n.primary {
+				n.handlePrePrepare(msg)
+			}
+		case msg := <-n.requestChannel:
+			if n.primary {
+				n.handleClientRequest(msg)
+			}
+		case msg := <-n.prepareChannel:
+			n.handlePrepare(msg)
 		}
 	}
+}
+
+func (n PBFTNode) handlePrePrepare(message *PrePrepareFull) {
+	log.Infof("PrePrepare detected %b", message)
+	// TODO: broadcast Prepares
+	// TODO: add both preprepare + prepare to log
+}
+
+func (n PBFTNode) handlePrepare(message *Prepare) {
+	log.Infof("Received Prepare %b", message)
+	// TODO: implement
 }
 
 func (n PBFTNode) handlePrePrepares() {
 	incoming := n.preprepareChannel
 	for {
 		pp := <-incoming
-		log.Infof("PrePrepare detected %b", pp)
+		n.handlePrePrepare(pp)
 	}
 }
 
@@ -194,7 +230,7 @@ func (n *PBFTNode) Ready(req *ReadyMsg, res *ReadyResp) error {
 
 func (n *PBFTNode) PrePrepare(req *PrePrepareFull, res *Ack) error {
 	res.success = true
-	n.preprepareChannel <- true
+	n.preprepareChannel <- req
 	return nil
 }
 
