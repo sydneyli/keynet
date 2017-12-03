@@ -11,14 +11,20 @@ var (
 )
 
 type ClusterConfig struct {
-	Nodes []NodeConfig
+	Primary PrimaryConfig
+	Nodes   []NodeConfig
+}
+
+type PrimaryConfig struct {
+	Id      int
+	RpcPort int
 }
 
 type NodeConfig struct {
-	Id       int
-	Hostname string
-	Primary  bool
-	Key      string
+	Id   int
+	Host string
+	Port int
+	Key  string
 }
 
 type KeyPair struct {

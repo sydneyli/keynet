@@ -16,10 +16,9 @@ package keystore
 
 import (
 	"bytes"
-	"distributepki/common"
 	"encoding/gob"
 	"encoding/json"
-	"log"
+	"pbft"
 	"sync"
 
 	"github.com/coreos/etcd/raft/raftpb"
@@ -30,7 +29,7 @@ import (
 type Kvstore struct {
 	mu            sync.RWMutex
 	kvStore       map[string]string // current committed key-value pairs
-	consensusNode common.ConsensusNode
+	consensusNode *pbft.PBFTNode
 }
 
 type kv struct {
@@ -38,7 +37,7 @@ type kv struct {
 	Val string
 }
 
-func NewKVStore(node common.ConsensusNode, initialStore map[string]string) *Kvstore {
+func NewKVStore(node *pbft.PBFTNode, initialStore map[string]string) *Kvstore {
 	if initialStore == nil {
 		initialStore = make(map[string]string)
 	}
@@ -62,12 +61,12 @@ func (s *Kvstore) Get(key string) (string, bool) {
 func (s *Kvstore) Put(k, v string) {
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(kv{k, v}); err != nil {
-		log.Fatal(err)
+		plog.Fatal(err)
 	}
-	s.consensusNode.Propose(buf.String())
+	s.consensusNode.Propose(0, buf.String())
 }
 
-func (s *Kvstore) readCommits(node common.ConsensusNode) {
+func (s *Kvstore) readCommits(node *pbft.PBFTNode) {
 	for data := range node.Committed() {
 		if data == nil {
 			// done replaying log; new data incoming
@@ -78,15 +77,15 @@ func (s *Kvstore) readCommits(node common.ConsensusNode) {
 				return
 			}
 			if err != nil && err != snap.ErrNoSnapshot {
-				log.Panic(err)
+				plog.Panic(err)
 			}
 			r_snapshot, ok := snapshot.(*raftpb.Snapshot)
 			if !ok {
-				log.Panic("Incorrectly-typed snapshot")
+				plog.Panic("Incorrectly-typed snapshot")
 			}
-			log.Printf("loading snapshot at term %d and index %d", r_snapshot.Metadata.Term, r_snapshot.Metadata.Index)
+			plog.Printf("loading snapshot at term %d and index %d", r_snapshot.Metadata.Term, r_snapshot.Metadata.Index)
 			if err := s.recoverFromSnapshot(r_snapshot.Data); err != nil {
-				log.Panic(err)
+				plog.Panic(err)
 			}
 			continue
 		}
@@ -94,14 +93,14 @@ func (s *Kvstore) readCommits(node common.ConsensusNode) {
 		var dataKv kv
 		dec := gob.NewDecoder(bytes.NewBufferString(*data))
 		if err := dec.Decode(&dataKv); err != nil {
-			log.Fatalf("raftexample: could not decode message (%v)", err)
+			plog.Fatalf("raftexample: could not decode message (%v)", err)
 		}
 		s.mu.Lock()
 		s.kvStore[dataKv.Key] = dataKv.Val
 		s.mu.Unlock()
 	}
 	if err, ok := <-node.Failure(); ok {
-		log.Fatal(err)
+		plog.Fatal(err)
 	}
 }
 

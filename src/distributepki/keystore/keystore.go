@@ -1,7 +1,6 @@
 package keystore
 
 import (
-	"distributepki/common"
 	"fmt"
 	"time"
 
@@ -43,50 +42,62 @@ func (e SignatureMismatch) Error() string {
 	return "Signature Mismatch"
 }
 
-// Public Key Store backed by DistributedStore
 type Keystore struct {
-	store common.DistributedStore
+	store *Kvstore
 }
 
-func NewKeystore(s common.DistributedStore) Keystore {
-	return Keystore{store: s}
+func NewKeystore(s *Kvstore) *Keystore {
+	return &Keystore{store: s}
 }
 
-func (ks *Keystore) CreateKey(alias Alias, key Key) error {
-	if _, ok := ks.store.Get(string(alias)); ok {
-		return AliasAlreadyExists(alias)
-	}
-	// TODO: make sure that key is valid key format here
-	plog.Infof("Create Key: %v for Alias: %v", key, alias)
-	ks.store.Put(string(alias), string(key))
+func (ks *Keystore) CreateKey(alias Alias, key Key, clientMessage string) error {
+	/*
+		if _, ok := ks.store.Get(string(alias)); ok {
+			return AliasAlreadyExists(alias)
+		}
+		// TODO: make sure that key is valid key format here
+		plog.Infof("Create Key: %v for Alias: %v", key, alias)
+		ks.store.Propose("Create", clientMessage)
+	*/
 	return nil
 }
 
-func (ks *Keystore) UpdateKey(alias Alias, update KeyUpdate) error {
-	var oldKey Key
-	if val, ok := ks.store.Get(string(alias)); !ok {
-		return AliasNotFoundError(alias)
-	} else {
-		oldKey = Key(val)
-	}
+func (ks *Keystore) UpdateKey(alias Alias, update KeyUpdate, clientMessage string) error {
+	/*
+		var oldKey Key
+		if val, ok := ks.store.Get(string(alias)); !ok {
+			return AliasNotFoundError(alias)
+		} else {
+			oldKey = Key(val)
+		}
 
-	if !verifyKeyUpdate(update, oldKey) {
-		return SignatureMismatch{update, oldKey}
-	}
+		if !verifyKeyUpdate(update, oldKey) {
+			return SignatureMismatch{update, oldKey}
+		}
 
-	plog.Infof("Update Alias: %v set Key: %v ", alias, update.key)
-	ks.store.Put(string(alias), string(update.key))
+		plog.Infof("Update Alias: %v set Key: %v ", alias, update.key)
+		ks.store.Propose("Update", clientMessage)
+	*/
 	return nil
 }
 
-func (ks *Keystore) LookupKey(alias Alias) (Key, error) {
-	if v, ok := ks.store.Get(string(alias)); ok {
-		key := Key(v)
-		plog.Infof("Keystore Lookup for Alias: %v returned %v", alias, key)
-		return key, nil
-	} else {
-		return Key(""), AliasNotFoundError(alias)
-	}
+func (ks *Keystore) LookupKey(alias Alias, clientMessage string) error {
+	/*
+		plog.Infof("Keystore Query for Alias: %v", alias)
+		ks.store.Propose("Lookup", clientMessage)
+	*/
+	return nil
+
+	// TODO: change once read-only transactions implemented
+	/*
+		if v, ok := ks.store.Get(string(alias)); ok {
+			key := Key(v)
+			plog.Infof("Keystore Lookup for Alias: %v returned %v", alias, key)
+			return key, nil
+		} else {
+			return Key(""), AliasNotFoundError(alias)
+		}
+	*/
 }
 
 func verifyKeyUpdate(update KeyUpdate, oldKey Key) bool {

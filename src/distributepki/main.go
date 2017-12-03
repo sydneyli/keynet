@@ -1,29 +1,12 @@
-// Copyright 2015 The etcd Authors
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 package main
 
 import (
-	"distributepki/common"
 	"distributepki/keystore"
-	//"distributepki/pbft"
-	"flag"
-	"pbft"
-	//"fmt"
-	//"strings"
+	"distributepki/util"
 	"encoding/json"
+	"flag"
 	"io/ioutil"
+	"pbft"
 
 	"github.com/coreos/pkg/capnslog"
 )
@@ -39,12 +22,10 @@ func logFatal(e error) {
 }
 
 func main() {
-	//cluster := flag.String("cluster", "http://127.0.0.1:9021", "comma separated cluster peers")
-	id := flag.Int("id", 1, "Node ID to start")
-	kvport := flag.Int("port", 9121, "HTTP server port")
-	//join := flag.Bool("join", false, "join an existing cluster")
 	configFile := flag.String("config", "cluster.json", "PBFT configuration file")
+	id := flag.Int("id", 1, "Node ID to start")
 	keystoreFile := flag.String("keys", "keys.json", "Initial keys in store")
+
 	flag.Parse()
 
 	log.Infof("Reading cluster configuration from %s...", *configFile)
@@ -57,10 +38,6 @@ func main() {
 
 	var thisNode pbft.NodeConfig
 	for _, n := range config.Nodes {
-		log.Infof("    [Node %d] %s", n.Id, n.Hostname)
-		if n.Primary {
-			log.Infof("        **PRIMARY**")
-		}
 		if n.Id == *id {
 			thisNode = n
 		}
@@ -76,7 +53,7 @@ func main() {
 	logFatal(err)
 
 	for _, n := range config.Nodes {
-		initialKeys = append(initialKeys, pbft.KeyPair{Key: n.Key, Alias: n.Hostname})
+		initialKeys = append(initialKeys, pbft.KeyPair{Key: n.Key, Alias: util.GetHostname(n.Host, n.Port)})
 	}
 
 	initialKeyTable := make(map[string]string)
@@ -85,32 +62,24 @@ func main() {
 		log.Infof("    %v => %v", kp.Alias, kp.Key)
 	}
 
-	log.Infof("Starting node %d (%s)...", *id, thisNode.Hostname)
+	log.Infof("Starting node %d (%s)...", *id, util.GetHostname(thisNode.Host, thisNode.Port))
 
-	ready := make(chan common.ConsensusNode)
+	ready := make(chan *pbft.PBFTNode)
 	go pbft.StartNode(thisNode, config, ready)
-
 	node := <-ready
 	if node != nil {
-		log.Info("Node started successfully!")
+		log.Info("PBFT node started successfully!")
 	} else {
-		log.Fatal("Node/cluster failed to start.")
+		log.Fatal("PBFT node/cluster failed to start.")
 	}
 
-	/* // Unneeded for now
-	var checkpointFn = func() ([]byte, error) {
-		checkpoint, err := kvs.MakeCheckpoint()
-		byte_checkpoint, ok := checkpoint.([]byte)
-		if !ok {
-			log.Panic("Checkpoint not a []byte array")
-		}
-		return byte_checkpoint, err
+	keyNode := NewKeyNode(
+		node,
+		keystore.NewKeystore(keystore.NewKVStore(node, initialKeyTable)),
+	)
+	if thisNode.Id == config.Primary.Id {
+		keyNode.StartRPC(config.Primary.RpcPort)
 	}
-	*/
 
-	log.Info("hsdfelldasf")
-	store := keystore.NewKeystore(keystore.NewKVStore(node, initialKeyTable))
-	log.Info("helldasf")
-	keystore.ServeKeystoreHttpApi(store, node, *kvport)
-	log.Info("hellsdfa")
+	<-node.Failure()
 }

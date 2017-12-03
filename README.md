@@ -7,6 +7,22 @@ go get .
 go build
 ```
 
+## Architecture (updated 12/2/17)
+
+Currently, the architecture of the project is closely tied to the PBFT backing
+algorithm. A `client` server communicates with the PBFT primary over RPC, and
+each replica communicates with its peers over RPC as well. In picture form:
+
+```
++--------+             +----------------------+
+| Client | <-- RPC --> | KeyNode +----------+ |
++--------+             |    ^    | Keystore | |             +----------+
+                       |    |    +----------+ |             |    ...   |
+                       +----v-----------------+             +----------+
+                       |       PBFTNode       | <-- RPC --> | PBFTNode |
+                       +----------------------+             +----------+
+```
+
 ## PBFT Setup
 
 Setting up the PBFT cluster requires two configuration files to configure the
@@ -54,9 +70,13 @@ Finally, to start up the cluster of `n` nodes, run `n` instances of
 ```
 ## Client usage
 
+To start up the client server, go to the `client/` directory and run `./client
+--config ../distributepki/cluster.json`.
+
 Currently, to look up a key initially inserted into the table, run the
 following curl command:
 ```
 curl -L http://localhost:<cluster node HTTP port>/<desired key>
 ```
+Depending on the current status of the project, that may not work.
 
