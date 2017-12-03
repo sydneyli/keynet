@@ -7,6 +7,20 @@ go get .
 go build
 ```
 
+## Architecture (updated 12/2/17)
+
+Currently, the architecture of the project is closely tied to the PBFT backing
+algorithm. A `client` server communicates with the PBFT primary over RPC, and
+each replica communicates with its peers over RPC as well. In picture form:
+
++--------+             +----------------------+
+| Client | <-- RPC --> | KeyNode +----------+ |
++--------+             |    ^    | Keystore | |             +----------+
+                       |    |    +----------+ |             |    ...   |
+                       +----v-----------------+             +----------+
+                       |       PBFTNode       | <-- RPC --> | PBFTNode |
+                       +----------------------+             +----------+
+
 ## PBFT Setup
 
 Setting up the PBFT cluster requires two configuration files to configure the
