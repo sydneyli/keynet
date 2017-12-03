@@ -96,45 +96,45 @@ func verifyKeyUpdate(update KeyUpdate, oldKey Key) bool {
 
 // RPCs
 type CreateRequest struct {
-	alias Alias
-	key   Key
+	Alias Alias
+	Key   Key
 }
 
 type UpdateRequest struct {
-	alias  Alias
-	update KeyUpdate
+	Alias  Alias
+	Update KeyUpdate
 }
 
 type LookupRequest struct {
-	alias Alias
+	Alias Alias
 }
 
 type Ack struct {
-	success bool
+	Success bool
 }
 
 type LookupAck struct {
-	success bool
-	key     Key
+	Success bool
+	Key     Key
 }
 
 func (ks *Keystore) CreateKeyRemote(args *CreateRequest, reply *Ack) error {
-	err := ks.CreateKey(args.alias, args.key)
-	reply.success = err == nil
+	err := ks.CreateKey(args.Alias, args.Key)
+	reply.Success = err == nil
 	return err
 }
 
 func (ks *Keystore) UpdateKeyRemote(args *UpdateRequest, reply *Ack) error {
-	err := ks.UpdateKey(args.alias, args.update)
-	reply.success = err == nil
+	err := ks.UpdateKey(args.Alias, args.Update)
+	reply.Success = err == nil
 	return err
 }
 
 func (ks *Keystore) LookupKeyRemote(args *LookupRequest, reply *LookupAck) error {
-	key, err := ks.LookupKey(args.alias)
-	reply.success = err == nil
-	if reply.success {
-		reply.key = key
+	key, err := ks.LookupKey(args.Alias)
+	reply.Success = err == nil
+	if reply.Success {
+		reply.Key = key
 	}
 	return err
 }

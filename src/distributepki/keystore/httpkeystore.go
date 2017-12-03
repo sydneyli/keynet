@@ -27,13 +27,13 @@ func (h *HttpKeystoreAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		args := &CreateRequest{
-			alias: alias,
-			key:   Key(val),
+			Alias: alias,
+			Key:   Key(val),
 		}
 		var response Ack
 
 		err = h.rpcClient.Call("Keystore.CreateKeyRemote", args, &response)
-		if err != nil || !response.success {
+		if err != nil || !response.Success {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		}
 
@@ -42,15 +42,15 @@ func (h *HttpKeystoreAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == "GET":
 
 		args := &LookupRequest{
-			alias: Alias(pathParam),
+			Alias: Alias(pathParam),
 		}
 		var response LookupAck
 
 		err := h.rpcClient.Call("Keystore.LookupKeyRemote", args, &response)
-		if err != nil || !response.success {
+		if err != nil || !response.Success {
 			http.Error(w, err.Error(), http.StatusNotFound)
 		} else {
-			w.Write([]byte(response.key))
+			w.Write([]byte(response.Key))
 		}
 
 	default:
@@ -61,22 +61,22 @@ func (h *HttpKeystoreAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func ServeKeystoreHttpApi(primaryHost string, primaryRpcPort int, port int) {
-	plog.Info(":" + strconv.Itoa(port))
+	plog.Info("API server going live at port " + strconv.Itoa(port) + "...")
 
 	client, err := rpc.DialHTTPPath("tcp", common.GetHostname(primaryHost, primaryRpcPort), "/public")
-	if err != nil {
-		plog.Fatal("dialing primary server:", err)
+	for err != nil {
+		client, err = rpc.DialHTTPPath("tcp", common.GetHostname(primaryHost, primaryRpcPort), "/public")
 	}
 
+	plog.Info("API server connected to primary")
 	srv := http.Server{
 		Addr: ":" + strconv.Itoa(port),
 		Handler: &HttpKeystoreAPI{
 			rpcClient: client,
 		},
 	}
-	go func() {
-		if err := srv.ListenAndServe(); err != nil {
-			plog.Fatal(err)
-		}
-	}()
+
+	if err := srv.ListenAndServe(); err != nil {
+		plog.Fatal(err)
+	}
 }

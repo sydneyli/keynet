@@ -63,9 +63,9 @@ func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- common.Conse
 		viewNumber:        0,
 		seqNumber:         0,
 	}
-	rpc.Register(&node)
 	server := rpc.NewServer()
-	server.HandleHTTP("/pbft", "/dbg2")
+	server.Register(&node)
+	server.HandleHTTP("/pbft", "/debug/pbft")
 
 	listener, e := net.Listen("tcp", common.GetHostname("", node.port))
 	if e != nil {
@@ -75,7 +75,6 @@ func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- common.Conse
 
 	if node.primary {
 		for i := 0; i < len(cluster.Nodes)-1; i++ {
-			log.Infof("hi %d", i)
 			<-node.startup
 		}
 		go node.handleRequests()
@@ -218,6 +217,9 @@ func sendRPC(hostName string, rpcName string, message interface{}, response inte
 	}
 
 	remoteCall := rpcClient.Go(rpcName, message, response, nil)
-	<-remoteCall.Done
+	result := <-remoteCall.Done
+	if result.Error != nil {
+		return result.Error
+	}
 	return nil
 }

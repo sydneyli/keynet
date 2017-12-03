@@ -40,10 +40,9 @@ func logFatal(e error) {
 
 func main() {
 	configFile := flag.String("config", "cluster.json", "PBFT configuration file")
-
-	pbftNode := flag.Bool("node", true, "[true] Start full PBFT node; [false] Start client")
 	id := flag.Int("id", 1, "Node ID to start")
 	keystoreFile := flag.String("keys", "keys.json", "Initial keys in store")
+	client := flag.Bool("client", false, "[false] Start full PBFT node; [true] Start client")
 	clientport := flag.Int("clientport", 9121, "HTTP server port")
 
 	flag.Parse()
@@ -57,7 +56,7 @@ func main() {
 	logFatal(err)
 
 	var store keystore.Keystore
-	if *pbftNode {
+	if !*client {
 
 		var thisNode pbft.NodeConfig
 		for _, n := range config.Nodes {
@@ -99,9 +98,9 @@ func main() {
 		store = keystore.NewKeystore(keystore.NewKVStore(node, initialKeyTable))
 
 		if config.Primary.Id == thisNode.Id {
-			rpc.Register(&store)
 			server := rpc.NewServer()
-			server.HandleHTTP("/public", "/dbg1")
+			server.Register(&store)
+			server.HandleHTTP("/public", "/debug/public")
 			l, e := net.Listen("tcp", common.GetHostname("", config.Primary.RpcPort))
 			if e != nil {
 				log.Fatal("listen error:", e)
