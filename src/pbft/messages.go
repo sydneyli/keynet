@@ -5,11 +5,25 @@ import (
 	"time"
 )
 
+type SlotId struct {
+	ViewNumber int
+	SeqNumber  int
+}
+
+func (slot SlotId) Before(other SlotId) bool {
+	if slot.ViewNumber == other.ViewNumber {
+		return slot.SeqNumber < other.SeqNumber
+	}
+	return slot.ViewNumber < other.ViewNumber
+}
+
 // REQUEST:
 // op, timestamp, client addr (signed by client)
 type ClientRequest struct {
-	opcode int
-	op     string
+	Opcode    int
+	Op        string
+	Timestamp time.Time
+	Client    net.Addr
 }
 
 // REPLY:
@@ -27,57 +41,34 @@ type ClientReply struct {
 // viewnum, seqnum, client message (digest)
 // (signed by node)
 type PrePrepare struct {
-	viewNumber int
-	seqNumber  int
+	Number SlotId
 }
 
 type PrePrepareFull struct {
-	pp      PrePrepare
-	message ClientRequest
+	Number  SlotId
+	Message ClientRequest
 }
 
 // PREPARE:
 // viewnum, seqnum, client message (digest), node addr
 // (signed by node i)
 type Prepare struct {
-	viewNumber int
-	seqNumber  int
-	message    ClientRequest
-	node       net.Addr
+	Number  SlotId
+	Message ClientRequest
+	Node    int // id
 }
 
 // COMMIT:
 // viewnum, seqnum, client message (digest), node addr
 // (signed by node i)
 type Commit struct {
-	viewNumber int
-	seqNumber  int
-	message    ClientRequest
-	node       net.Addr
+	Number  SlotId
+	Message ClientRequest
+	Node    int // id
 }
 
 type Ack struct {
-	success bool
+	Success bool
 }
 
 type Message int
-
-func (t *Message) ClientMessage(request *ClientRequest, reply *ClientReply) error {
-	// TODO implement
-	return nil
-}
-
-func (t *Message) PrePrepare(data *PrePrepare, reply *Ack) error {
-	// TODO implement
-	return nil
-}
-
-func (t *Message) Prepare(data *Prepare, reply *Ack) error {
-	// TODO implement
-	return nil
-}
-
-func (t *Message) Commit(data *Commit, reply *Ack) error {
-	// TODO implement
-	return nil
-}
