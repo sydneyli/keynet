@@ -1,8 +1,7 @@
 package pbft
 
 import (
-	"distributepki/common"
-	"encoding/json"
+	"distributepki/util"
 	"net"
 	"net/http"
 	"net/rpc"
@@ -39,12 +38,12 @@ type PBFTNode struct {
 type ReadyMsg int
 type ReadyResp bool
 
-func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- common.ConsensusNode) {
+func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- *PBFTNode) {
 
 	peers := make([]string, len(cluster.Nodes)-1)
 	for _, p := range cluster.Nodes {
 		if p.Id != host.Id {
-			peers = append(peers, common.GetHostname(p.Host, p.Port))
+			peers = append(peers, util.GetHostname(p.Host, p.Port))
 		}
 	}
 
@@ -67,7 +66,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- common.Conse
 	server.Register(&node)
 	server.HandleHTTP("/pbft", "/debug/pbft")
 
-	listener, e := net.Listen("tcp", common.GetHostname("", node.port))
+	listener, e := net.Listen("tcp", util.GetHostname("", node.port))
 	if e != nil {
 		log.Fatal("Listen error:", e)
 	}
@@ -82,7 +81,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- common.Conse
 		node.signalReady(cluster)
 		go node.handlePrePrepares()
 	}
-	ready <- node
+	ready <- &node
 }
 
 func (n PBFTNode) ConfigChange(interface{}) {
@@ -93,16 +92,16 @@ func (n PBFTNode) Failure() chan error {
 	return n.errorChannel
 }
 
-func (n PBFTNode) Propose(s string) {
+func (n PBFTNode) Propose(opcode int, s string) {
 
 	if !n.primary {
 		return // no proposals for non-primary nodes
 	}
 
 	request := new(ClientRequest)
-	if err := json.Unmarshal([]byte(s), request); err != nil {
-		log.Fatal("json unmarshal: ", err)
-	}
+	request.opcode = opcode
+	request.op = s
+
 	n.requestChannel <- request
 }
 
@@ -178,7 +177,7 @@ func (n PBFTNode) signalReady(cluster ClusterConfig) {
 	}
 
 	message := ReadyMsg(cluster.Primary.Id)
-	err := sendRPC(common.GetHostname(primary.Host, primary.Port), "PBFTNode.Ready", &message, new(ReadyResp), -1)
+	err := sendRPC(util.GetHostname(primary.Host, primary.Port), "PBFTNode.Ready", &message, new(ReadyResp), -1)
 	if err != nil {
 		log.Fatal(err)
 	}

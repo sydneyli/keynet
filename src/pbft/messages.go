@@ -8,9 +8,8 @@ import (
 // REQUEST:
 // op, timestamp, client addr (signed by client)
 type ClientRequest struct {
-	op        string
-	timestamp time.Time
-	client    net.Addr
+	opcode int
+	op     string
 }
 
 // REPLY:

@@ -54,9 +54,13 @@ Finally, to start up the cluster of `n` nodes, run `n` instances of
 ```
 ## Client usage
 
+To start up the client server, go to the `client/` directory and run `./client
+--config ../distributepki/cluster.json`.
+
 Currently, to look up a key initially inserted into the table, run the
 following curl command:
 ```
 curl -L http://localhost:<cluster node HTTP port>/<desired key>
 ```
+Depending on the current status of the project, that may not work.
 
