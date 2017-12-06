@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
-	"net/rpc"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -103,25 +102,6 @@ func StartCluster(initialKeyTable *map[string]string, cluster *pbft.ClusterConfi
 	}
 }
 
-// TODO (sydli): Dedupe with sendRPC in pbft/ package... maybe in utils or something?
-func rpcTo(machineId int, hostName string, rpcName string, message interface{}, response interface{}, retries int) error {
-	log.Infof("[REPL] Sending rpc to %d", machineId)
-	// TODO (sydli): PBFT endpoint should be a constant somewhere, probably.
-	rpcClient, err := rpc.DialHTTPPath("tcp", hostName, "/pbft")
-	for nRetries := 0; err != nil && retries < nRetries; nRetries++ {
-		rpcClient, err = rpc.DialHTTPPath("tcp", hostName, "/pbft")
-	}
-	if err != nil {
-		return err
-	}
-	remoteCall := rpcClient.Go(rpcName, message, response, nil)
-	result := <-remoteCall.Done
-	if result.Error != nil {
-		return result.Error
-	}
-	return nil
-}
-
 // TODO (sydli): the below needs a massive cleanup
 func StartRepl(cluster *pbft.ClusterConfig) {
 	for {
@@ -177,13 +157,12 @@ func StartRepl(cluster *pbft.ClusterConfig) {
 				break
 			}
 		}
-		err := rpcTo(
-			id,
+		err := util.SendRpc(
 			util.GetHostname(to.Host, to.Port),
+			pbft.ENDPOINT,
 			"PBFTNode.Debug",
 			&message,
-			response,
-			10)
+			response)
 		if err != nil {
 			log.Fatal(err)
 		}
