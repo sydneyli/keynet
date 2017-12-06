@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	log = capnslog.NewPackageLogger("github.com/sydli/distributePKI", "pbft")
+	plog = capnslog.NewPackageLogger("github.com/sydli/distributePKI", "pbft")
 )
 
 type ClusterConfig struct {

@@ -5,18 +5,6 @@ import (
 	"time"
 )
 
-type SlotId struct {
-	ViewNumber int
-	SeqNumber  int
-}
-
-func (slot SlotId) Before(other SlotId) bool {
-	if slot.ViewNumber == other.ViewNumber {
-		return slot.SeqNumber < other.SeqNumber
-	}
-	return slot.ViewNumber < other.ViewNumber
-}
-
 // REQUEST:
 // op, timestamp, client addr (signed by client)
 type ClientRequest struct {
@@ -45,8 +33,8 @@ type PrePrepare struct {
 }
 
 type PrePrepareFull struct {
-	Number  SlotId
-	Message ClientRequest
+	PrePrepareMessage PrePrepare
+	Request           ClientRequest
 }
 
 // PREPARE:
