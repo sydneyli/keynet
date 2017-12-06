@@ -11,6 +11,8 @@ import (
 
 var machineId int
 
+const Endpoint string = "/pbft"
+
 type PBFTNode struct {
 	id      int
 	host    string
@@ -183,11 +185,11 @@ func (n PBFTNode) handleClientRequest(request *ClientRequest) {
 		responses[i] = new(Ack)
 	}
 	n.Log("Sending Preprepare messages for %+v", id)
-	bcastRPC(n.peermap, "PBFTNode.PrePrepare", &fullMessage, responses, 10)
+	bcastRPC(n.peermap, "PBFTNode.PrePrepare", &fullMessage, responses)
 
 	for i, r := range responses {
 		n.Log("Preprepare response %d: %+v", i, r)
-		bcastRPC(n.peermap, "PBFTNode.PrePrepare", &fullMessage, responses, 10)
+		// bcastRPC(n.peermap, "PBFTNode.PrePrepare", &fullMessage, responses)
 	}
 }
 
@@ -258,7 +260,7 @@ func (n PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
 	for i, _ := range n.peermap {
 		responses[i] = new(Ack)
 	}
-	bcastRPC(n.peermap, "PBFTNode.Prepare", &prepare, responses, 10)
+	bcastRPC(n.peermap, "PBFTNode.Prepare", &prepare, responses)
 
 	for i, r := range responses {
 		n.Log("Prepare response %d: %+v", i, r)
@@ -277,7 +279,7 @@ func (n PBFTNode) isCommitted(slot Slot) bool {
 
 func (n PBFTNode) handlePrepare(message *Prepare) {
 	// TODO: validate prepare message
-	plog.Infof("Received Prepare %+v", message)
+	n.Log("Received Prepare %b", message)
 	/*
 		// TODO: come back and fix this
 		if message.Number.Before(n.mostRecentCommitted) {
@@ -301,7 +303,7 @@ func (n PBFTNode) handlePrepare(message *Prepare) {
 		for i, _ := range n.peermap {
 			responses[i] = new(Ack)
 		}
-		bcastRPC(n.peermap, "PBFTNode.Commit", &commit, responses, 10)
+		bcastRPC(n.peermap, "PBFTNode.Commit", &commit, responses)
 	}
 }
 
@@ -321,7 +323,7 @@ func (n PBFTNode) handleCommit(message *Commit) {
 	if n.isCommitted(slot) {
 		// TODO: try to execute as many sequential queries as possible and
 		// then reply to the clients via committedChannel
-		plog.Infof("NODE %d COMMITTED %+v", n.id, message.Number)
+		n.Log("COMMITTED %+v", n.id, message.Number)
 	}
 }
 
@@ -338,7 +340,7 @@ func (n PBFTNode) signalReady(cluster ClusterConfig) {
 	}
 
 	message := ReadyMsg(cluster.Primary.Id)
-	err := sendRPC(cluster.Primary.Id, util.GetHostname(primary.Host, primary.Port), "PBFTNode.Ready", &message, new(ReadyResp), -1)
+	err := sendRPC(cluster.Primary.Id, util.GetHostname(primary.Host, primary.Port), "PBFTNode.Ready", &message, new(ReadyResp))
 	if err != nil {
 		n.Error("%v", err)
 	}
@@ -373,29 +375,16 @@ func (n *PBFTNode) Commit(req *Commit, res *Ack) error {
 // ** RPC ** //
 // both currently sync
 
-func bcastRPC(peers map[int]string, rpcName string, message interface{}, response map[int]interface{}, retries int) {
+func bcastRPC(peers map[int]string, rpcName string, message interface{}, response map[int]interface{}) {
 	for i, p := range peers {
-		err := sendRPC(i, p, rpcName, message, response[i], retries)
+		err := sendRPC(i, p, rpcName, message, response[i])
 		if err != nil {
 			plog.Fatalf("[Node %d] %v", machineId, err)
 		}
 	}
 }
 
-func sendRPC(peerId int, hostName string, rpcName string, message interface{}, response interface{}, retries int) error {
-	plog.Infof("[Node %d] Sending RPC %s to %d", machineId, rpcName, peerId)
-	rpcClient, err := rpc.DialHTTPPath("tcp", hostName, "/pbft")
-	for nRetries := 0; err != nil && retries < nRetries; nRetries++ {
-		rpcClient, err = rpc.DialHTTPPath("tcp", hostName, "/pbft")
-	}
-	if err != nil {
-		return err
-	}
-
-	remoteCall := rpcClient.Go(rpcName, message, response, nil)
-	result := <-remoteCall.Done
-	if result.Error != nil {
-		return result.Error
-	}
-	return nil
+func sendRPC(peerId int, hostName string, rpcName string, message interface{}, response interface{}) error {
+	plog.Infof("[Node %d] Sending rpc to %d", machineId, peerId)
+	return util.SendRpc(hostName, Endpoint, rpcName, message, response)
 }
