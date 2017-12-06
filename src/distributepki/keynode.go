@@ -21,12 +21,25 @@ const OP_CREATE = 0x01
 const OP_UPDATE = 0x02
 const OP_LOOKUP = 0x03
 
+func (kn *KeyNode) serveKeyRequests() {
+	for request := range kn.consensusNode.KeyRequest {
+		s := "testkey"
+		request.Reply <- &s
+		// TODO: finish implementing
+		// if v, ok := kn.store.Get(request.Hostname); ok {
+		// 	request.Reply <- v
+		// } else {
+		// 	request.Reply <- nil
+		// }
+	}
+}
+
 func NewKeyNode(node *pbft.PBFTNode, store *keystore.Keystore) KeyNode {
 	n := KeyNode{
 		consensusNode: node,
 		store:         store,
 	}
-
+	go n.serveKeyRequests()
 	return n
 }
 

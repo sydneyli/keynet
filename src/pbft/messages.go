@@ -8,6 +8,7 @@ import (
 // REQUEST:
 // op, timestamp, client addr (signed by client)
 type ClientRequest struct {
+	Id        int64 // to prevent request replay
 	Opcode    int
 	Op        string
 	Timestamp time.Time
@@ -43,7 +44,7 @@ type PrePrepareFull struct {
 type Prepare struct {
 	Number  SlotId
 	Message ClientRequest
-	Node    int // id
+	Node    NodeId
 }
 
 // COMMIT:
@@ -52,7 +53,7 @@ type Prepare struct {
 type Commit struct {
 	Number  SlotId
 	Message ClientRequest
-	Node    int // id
+	Node    NodeId
 }
 
 type Ack struct {

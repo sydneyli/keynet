@@ -70,7 +70,7 @@ func main() {
 	} else if *debug {
 		StartRepl(&config)
 	} else {
-		StartNode(*id, &initialKeyTable, &config)
+		StartNode(pbft.NodeId(*id), &initialKeyTable, &config)
 	}
 }
 
@@ -115,7 +115,7 @@ func StartRepl(cluster *pbft.ClusterConfig) {
 		// args := cmdList[1:]
 		response := new(pbft.Ack)
 		var message pbft.DebugMessage
-		var id int
+		var id pbft.NodeId
 		switch cmd := cmdList[0]; cmd {
 		case "exit":
 			return
@@ -124,6 +124,7 @@ func StartRepl(cluster *pbft.ClusterConfig) {
 				Op: pbft.PUT,
 				Request: pbft.ClientRequest{
 					Op:        "bingo",
+					Id:        time.Now().UnixNano(),
 					Timestamp: time.Now(),
 					Client:    nil,
 				},
@@ -131,7 +132,7 @@ func StartRepl(cluster *pbft.ClusterConfig) {
 			id = cluster.Primary.Id
 		case "up":
 			if i, err := strconv.Atoi(cmdList[1]); err == nil {
-				id = i
+				id = pbft.NodeId(i)
 			} else {
 				fmt.Println("Please specify which node you want to bring up!")
 				return
@@ -141,7 +142,7 @@ func StartRepl(cluster *pbft.ClusterConfig) {
 			}
 		case "down":
 			if i, err := strconv.Atoi(cmdList[1]); err == nil {
-				id = i
+				id = pbft.NodeId(i)
 			} else {
 				fmt.Println("Please specify which node you want to take down!")
 				return
@@ -173,7 +174,7 @@ func StartRepl(cluster *pbft.ClusterConfig) {
 	}
 }
 
-func StartNode(id int, initialKeyTable *map[string]string, cluster *pbft.ClusterConfig) {
+func StartNode(id pbft.NodeId, initialKeyTable *map[string]string, cluster *pbft.ClusterConfig) {
 	var thisNode pbft.NodeConfig
 	for _, n := range cluster.Nodes {
 		if n.Id == id {
@@ -181,16 +182,14 @@ func StartNode(id int, initialKeyTable *map[string]string, cluster *pbft.Cluster
 		}
 	}
 	log.Infof("Starting node %d (%s)...", id, util.GetHostname(thisNode.Host, thisNode.Port))
-
 	ready := make(chan *pbft.PBFTNode)
 	go pbft.StartNode(thisNode, *cluster, ready)
 	node := <-ready
-	if node != nil {
-		log.Infof("Node %d started successfully!", id)
-	} else {
+	if node == nil {
 		log.Fatalf("Node %d failed to start.", id)
+		return
 	}
-
+	log.Infof("Node %d started successfully!", id)
 	keyNode := NewKeyNode(
 		node,
 		keystore.NewKeystore(keystore.NewKVStore(node, *initialKeyTable)),

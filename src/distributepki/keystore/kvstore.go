@@ -47,7 +47,7 @@ func NewKVStore(node *pbft.PBFTNode, initialStore map[string]string) *Kvstore {
 	// replay log into key-value map
 	// s.readCommits(node)
 	// read commits from cluster into kvStore map until error
-	// go s.readCommits(node)
+	go s.readCommits(node)
 	return s
 }
 
