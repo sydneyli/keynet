@@ -14,7 +14,6 @@ type DebugMessage struct {
 }
 
 func (n *PBFTNode) Debug(req *DebugMessage, res *Ack) error {
-	res.Success = true
 	n.debugChannel <- req
 	return nil
 }

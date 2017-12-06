@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/http"
 	"net/rpc"
-	// "time"
 )
 
 var machineId int
@@ -16,7 +15,6 @@ type PBFTNode struct {
 	host    string
 	port    int
 	primary bool
-	peers   []string
 	peermap map[int]string // id => hostname
 	startup chan bool
 
@@ -39,6 +37,16 @@ type SlotId struct {
 	SeqNumber  int
 }
 
+type Slot struct {
+	// number     SlotId
+	request    *ClientRequest
+	preprepare *PrePrepareFull
+	prepares   map[int]*Prepare
+	commits    map[int]*Commit
+	prepared   bool
+	committed  bool
+}
+
 func (slot SlotId) Before(other SlotId) bool {
 	if slot.ViewNumber == other.ViewNumber {
 		return slot.SeqNumber < other.SeqNumber
@@ -46,24 +54,14 @@ func (slot SlotId) Before(other SlotId) bool {
 	return slot.ViewNumber < other.ViewNumber
 }
 
-type Slot struct {
-	// number     SlotId
-	request    *ClientRequest
-	preprepare *PrePrepareFull
-	prepares   map[int]*Prepare
-	commits    map[int]*Commit
-}
-
 type ReadyMsg int
 type ReadyResp bool
 
 func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- *PBFTNode) {
-	peers := make([]string, 0)
 	peermap := make(map[int]string)
 	for _, p := range cluster.Nodes {
 		if p.Id != host.Id {
 			peermap[p.Id] = util.GetHostname(p.Host, p.Port)
-			peers = append(peers, util.GetHostname(p.Host, p.Port))
 		}
 	}
 	initSlotId := SlotId{
@@ -77,7 +75,6 @@ func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- *PBFTNode) {
 		host:                host.Host,
 		port:                host.Port,
 		primary:             cluster.Primary.Id == host.Id,
-		peers:               peers,
 		peermap:             peermap,
 		startup:             make(chan bool, len(cluster.Nodes)-1),
 		debugChannel:        make(chan *DebugMessage),
@@ -110,7 +107,6 @@ func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- *PBFTNode) {
 	}
 	go node.handleMessages()
 	ready <- &node
-
 }
 
 func (n PBFTNode) Log(format string, args ...interface{}) {
@@ -176,22 +172,13 @@ func (n PBFTNode) handleClientRequest(request *ClientRequest) {
 		preprepare: &fullMessage,
 		prepares:   make(map[int]*Prepare),
 		commits:    make(map[int]*Commit),
+		prepared:   false,
+		committed:  false,
 	}
 
-	responses := make(map[int]interface{})
-	for i, _ := range n.peermap {
-		responses[i] = new(Ack)
-	}
-	n.Log("Sending Preprepare messages for %+v", id)
-	bcastRPC(n.peermap, "PBFTNode.PrePrepare", &fullMessage, responses, 10)
-
-	for i, r := range responses {
-		n.Log("Preprepare response %d: %+v", i, r)
-		bcastRPC(n.peermap, "PBFTNode.PrePrepare", &fullMessage, responses, 10)
-	}
+	go bcastRPC(n.peermap, "PBFTNode.PrePrepare", &fullMessage, 10)
 }
 
-// ** Remote Calls ** //
 func (n PBFTNode) handleMessages() {
 	for {
 		select {
@@ -222,6 +209,8 @@ func (n PBFTNode) ensureMapping(num SlotId) Slot {
 			preprepare: nil,
 			prepares:   make(map[int]*Prepare),
 			commits:    make(map[int]*Commit),
+			prepared:   false,
+			committed:  false,
 		}
 		/*
 			// TODO: necessary?
@@ -235,7 +224,6 @@ func (n PBFTNode) ensureMapping(num SlotId) Slot {
 }
 
 func (n PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
-	n.Log("PrePrepare detected %+v", preprepare)
 	preprepareMessage := preprepare.PrePrepareMessage
 	prepare := Prepare{
 		Number:  preprepareMessage.Number,
@@ -252,32 +240,21 @@ func (n PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
 	matchingSlot.preprepare = preprepare
 	n.log[preprepareMessage.Number] = matchingSlot
 
-	n.Log("PREPREPARED %+v", prepare.Number)
-	// broadcast prepares
-	responses := make(map[int]interface{})
-	for i, _ := range n.peermap {
-		responses[i] = new(Ack)
-	}
-	bcastRPC(n.peermap, "PBFTNode.Prepare", &prepare, responses, 10)
-
-	for i, r := range responses {
-		n.Log("Prepare response %d: %+v", i, r)
-	}
+	go bcastRPC(n.peermap, "PBFTNode.Prepare", &prepare, 10)
 }
 
 func (n PBFTNode) isPrepared(slot Slot) bool {
 	// # Prepares received >= 2f = 2 * ((N - 1) / 3)
-	return slot.preprepare != nil && len(slot.prepares) >= 2*(len(n.peers)/3)
+	return slot.preprepare != nil && len(slot.prepares) >= 2*(len(n.peermap)/3)
 }
 
 func (n PBFTNode) isCommitted(slot Slot) bool {
 	// # Commits received >= 2f + 1 = 2 * ((N - 1) / 3) + 1
-	return n.isPrepared(slot) && len(slot.commits) >= 2*(len(n.peers)/3)+1
+	return n.isPrepared(slot) && len(slot.commits) >= 2*(len(n.peermap)/3)+1
 }
 
 func (n PBFTNode) handlePrepare(message *Prepare) {
 	// TODO: validate prepare message
-	plog.Infof("Received Prepare %+v", message)
 	/*
 		// TODO: come back and fix this
 		if message.Number.Before(n.mostRecentCommitted) {
@@ -287,27 +264,25 @@ func (n PBFTNode) handlePrepare(message *Prepare) {
 	slot := n.ensureMapping(message.Number)
 	//TODO: check that the prepare matches the pre-prepare message if it exists
 	slot.prepares[message.Node] = message
+	nowPrepared := !slot.prepared && n.isPrepared(slot)
+	if nowPrepared {
+		slot.prepared = true
+	}
 	n.log[message.Number] = slot
 
-	if n.isPrepared(slot) {
+	if nowPrepared {
 		n.Log("PREPARED %+v", message.Number)
 		commit := Commit{
 			Number:  message.Number,
 			Message: message.Message,
 			Node:    n.id,
 		}
-		// broadcast commit
-		responses := make(map[int]interface{})
-		for i, _ := range n.peermap {
-			responses[i] = new(Ack)
-		}
-		bcastRPC(n.peermap, "PBFTNode.Commit", &commit, responses, 10)
+		go bcastRPC(n.peermap, "PBFTNode.Commit", &commit, 10)
 	}
 }
 
 func (n PBFTNode) handleCommit(message *Commit) {
 	// TODO: validate commit message
-	n.Log("Received Commit %+v", message)
 	/*
 		// TODO: come back and fix validation
 		if message.Number.Before(n.mostRecentCommitted) {
@@ -316,12 +291,16 @@ func (n PBFTNode) handleCommit(message *Commit) {
 	*/
 	slot := n.ensureMapping(message.Number)
 	slot.commits[message.Node] = message
+	nowCommitted := !slot.committed && n.isCommitted(slot)
+	if nowCommitted {
+		slot.committed = true
+	}
 	n.log[message.Number] = slot
 
-	if n.isCommitted(slot) {
+	if nowCommitted {
 		// TODO: try to execute as many sequential queries as possible and
 		// then reply to the clients via committedChannel
-		plog.Infof("NODE %d COMMITTED %+v", n.id, message.Number)
+		n.Log("NODE %d COMMITTED %+v", n.id, message.Number)
 	}
 }
 
@@ -338,7 +317,7 @@ func (n PBFTNode) signalReady(cluster ClusterConfig) {
 	}
 
 	message := ReadyMsg(cluster.Primary.Id)
-	err := sendRPC(cluster.Primary.Id, util.GetHostname(primary.Host, primary.Port), "PBFTNode.Ready", &message, new(ReadyResp), -1)
+	err := sendRPC(cluster.Primary.Id, util.GetHostname(primary.Host, primary.Port), "PBFTNode.Ready", &message, -1)
 	if err != nil {
 		n.Error("%v", err)
 	}
@@ -353,36 +332,31 @@ func (n *PBFTNode) Ready(req *ReadyMsg, res *ReadyResp) error {
 // ** Protocol **//
 
 func (n *PBFTNode) PrePrepare(req *PrePrepareFull, res *Ack) error {
-	res.Success = true
 	n.preprepareChannel <- req
 	return nil
 }
 
 func (n *PBFTNode) Prepare(req *Prepare, res *Ack) error {
-	res.Success = true
 	n.prepareChannel <- req
 	return nil
 }
 
 func (n *PBFTNode) Commit(req *Commit, res *Ack) error {
-	res.Success = true
 	n.commitChannel <- req
 	return nil
 }
 
 // ** RPC ** //
-// both currently sync
-
-func bcastRPC(peers map[int]string, rpcName string, message interface{}, response map[int]interface{}, retries int) {
+func bcastRPC(peers map[int]string, rpcName string, message interface{}, retries int) {
 	for i, p := range peers {
-		err := sendRPC(i, p, rpcName, message, response[i], retries)
+		err := sendRPC(i, p, rpcName, message, retries)
 		if err != nil {
 			plog.Fatalf("[Node %d] %v", machineId, err)
 		}
 	}
 }
 
-func sendRPC(peerId int, hostName string, rpcName string, message interface{}, response interface{}, retries int) error {
+func sendRPC(peerId int, hostName string, rpcName string, message interface{}, retries int) error {
 	plog.Infof("[Node %d] Sending RPC %s to %d", machineId, rpcName, peerId)
 	rpcClient, err := rpc.DialHTTPPath("tcp", hostName, "/pbft")
 	for nRetries := 0; err != nil && retries < nRetries; nRetries++ {
@@ -392,7 +366,7 @@ func sendRPC(peerId int, hostName string, rpcName string, message interface{}, r
 		return err
 	}
 
-	remoteCall := rpcClient.Go(rpcName, message, response, nil)
+	remoteCall := rpcClient.Go(rpcName, message, nil, nil)
 	result := <-remoteCall.Done
 	if result.Error != nil {
 		return result.Error
