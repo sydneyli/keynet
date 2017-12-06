@@ -188,6 +188,5 @@ func StartNode(id int, initialKeyTable *map[string]string, cluster *pbft.Cluster
 	if thisNode.Id == cluster.Primary.Id {
 		keyNode.StartRPC(cluster.Primary.RpcPort)
 	}
-
 	<-node.Failure()
 }

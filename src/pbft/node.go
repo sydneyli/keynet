@@ -6,7 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/rpc"
-	//"time"
+	"time"
 )
 
 var machineId int
@@ -105,28 +105,22 @@ func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- *PBFTNode) {
 		for i := 0; i < len(cluster.Nodes)-1; i++ {
 			<-node.startup
 		}
-		// Try to commit a fake request
-		/*
-			fakeRequest := ClientRequest{
-				Op:        "bingo",
-				Timestamp: time.Now(),
-				Client:    nil,
-			}
-			node.handleClientRequest(&fakeRequest)
-		*/
 	} else {
 		node.signalReady(cluster)
 	}
 	go node.handleMessages()
 	ready <- &node
+
 }
 
 func (n PBFTNode) Log(format string, args ...interface{}) {
-	plog.Infof("[Node %d] "+format, n.id, args)
+	args = append([]interface{}{n.id}, args...)
+	plog.Infof("[Node %d] "+format, args...)
 }
 
 func (n PBFTNode) Error(format string, args ...interface{}) {
-	plog.Fatalf("[Node %d] "+format, n.id, args)
+	args = append([]interface{}{n.id}, args...)
+	plog.Fatalf("[Node %d] "+format, args...)
 }
 
 func (n PBFTNode) Failure() chan error {
@@ -167,6 +161,8 @@ func (n PBFTNode) handleClientRequest(request *ClientRequest) {
 		ViewNumber: n.viewNumber,
 		SeqNumber:  n.sequenceNumber,
 	}
+
+	n.Log("Received new request (%+v) - View Number: %d, Sequence Number: %d", *request, n.viewNumber, n.sequenceNumber)
 
 	fullMessage := PrePrepareFull{
 		PrePrepareMessage: PrePrepare{
@@ -249,7 +245,7 @@ func (n PBFTNode) handleDebug(debug *DebugMessage) {
 }
 
 func (n PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
-	n.Log("PrePrepare detected %b", preprepare)
+	n.Log("PrePrepare detected %+v", preprepare)
 	preprepareMessage := preprepare.PrePrepareMessage
 	prepare := Prepare{
 		Number:  preprepareMessage.Number,
@@ -291,7 +287,7 @@ func (n PBFTNode) isCommitted(slot Slot) bool {
 
 func (n PBFTNode) handlePrepare(message *Prepare) {
 	// TODO: validate prepare message
-	plog.Infof("Received Prepare %b", message)
+	plog.Infof("Received Prepare %+v", message)
 	/*
 		// TODO: come back and fix this
 		if message.Number.Before(n.mostRecentCommitted) {
@@ -321,7 +317,7 @@ func (n PBFTNode) handlePrepare(message *Prepare) {
 
 func (n PBFTNode) handleCommit(message *Commit) {
 	// TODO: validate commit message
-	n.Log("Received Commit %b", message)
+	n.Log("Received Commit %+v", message)
 	/*
 		// TODO: come back and fix validation
 		if message.Number.Before(n.mostRecentCommitted) {
