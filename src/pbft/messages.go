@@ -56,7 +56,6 @@ type Commit struct {
 }
 
 type Ack struct {
-	Success bool
 }
 
 type Message int

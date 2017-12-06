@@ -50,6 +50,7 @@ type Slot struct {
 }
 
 type ReadyMsg int
+type ReadyResp bool
 
 func (slot SlotId) Before(other SlotId) bool {
 	if slot.ViewNumber == other.ViewNumber {
@@ -153,7 +154,7 @@ func (n PBFTNode) handleClientRequest(request *ClientRequest) {
 		return
 	}
 
-	n.sequenceNumber += 1
+	n.sequenceNumber = n.sequenceNumber + 1
 	id := SlotId{
 		ViewNumber: n.viewNumber,
 		SeqNumber:  n.sequenceNumber,
@@ -301,7 +302,7 @@ func (n PBFTNode) handleCommit(message *Commit) {
 	if nowCommitted {
 		// TODO: try to execute as many sequential queries as possible and
 		// then reply to the clients via committedChannel
-		n.Log("COMMITTED %+v", n.id, message.Number)
+		n.Log("COMMITTED %+v", message.Number)
 	}
 }
 
@@ -318,14 +319,14 @@ func (n PBFTNode) signalReady(cluster ClusterConfig) {
 	}
 
 	message := ReadyMsg(cluster.Primary.Id)
-	err := sendRpc(cluster.Primary.Id, util.GetHostname(primary.Host, primary.Port), "PBFTNode.Ready", &message, -1)
+	err := sendRpc(cluster.Primary.Id, util.GetHostname(primary.Host, primary.Port), "PBFTNode.Ready", &message, nil)
 	if err != nil {
 		n.Error("%v", err)
 	}
 }
 
-func (n *PBFTNode) Ready(req *ReadyMsg, res *Ack) error {
-	res.Success = true
+func (n *PBFTNode) Ready(req *ReadyMsg, res *ReadyResp) error {
+	*res = ReadyResp(true)
 	n.startup <- true
 	return nil
 }
@@ -350,7 +351,7 @@ func (n *PBFTNode) Commit(req *Commit, res *Ack) error {
 // ** RPC ** //
 func bcastRpc(peers map[int]string, rpcName string, message interface{}) {
 	for i, p := range peers {
-		err := sendRpc(i, p, rpcName, message, new(Ack))
+		err := sendRpc(i, p, rpcName, message, nil)
 		if err != nil {
 			plog.Fatalf("[Node %d] %v", machineId, err)
 		}
@@ -358,6 +359,6 @@ func bcastRpc(peers map[int]string, rpcName string, message interface{}) {
 }
 
 func sendRpc(peerId int, hostName string, rpcName string, message interface{}, response interface{}) error {
-	plog.Infof("[Node %d] Sending RCP (%s) to Node %d", machineId, rpcName, peerId)
+	plog.Infof("[Node %d] Sending RPC (%s) to Node %d", machineId, rpcName, peerId)
 	return util.SendRpc(hostName, ENDPOINT, rpcName, message, response)
 }
