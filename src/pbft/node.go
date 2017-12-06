@@ -94,7 +94,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- *PBFTNode) {
 	server.Register(&node)
 	server.HandleHTTP("/pbft", "/debug/pbft")
 
-	listener, e := net.Listen("tcp", util.GetHostname("", node.port))
+	listener, e := net.Listen("tcp", util.GetHostname("localhost", node.port))
 	if e != nil {
 		node.Error("Listen error: %v", e)
 	}

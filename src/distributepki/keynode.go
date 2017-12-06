@@ -34,7 +34,7 @@ func (kn *KeyNode) StartRPC(rpcPort int) {
 	server := rpc.NewServer()
 	server.Register(kn)
 	server.HandleHTTP("/public", "/debug/public")
-	l, e := net.Listen("tcp", util.GetHostname("", rpcPort))
+	l, e := net.Listen("tcp", util.GetHostname("localhost", rpcPort))
 	if e != nil {
 		log.Fatal("listen error:", e)
 	}
