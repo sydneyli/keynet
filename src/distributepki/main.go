@@ -162,7 +162,8 @@ func StartRepl(cluster *pbft.ClusterConfig) {
 			pbft.ENDPOINT,
 			"PBFTNode.Debug",
 			&message,
-			response)
+			response,
+			10)
 		if err != nil {
 			log.Fatal(err)
 		}

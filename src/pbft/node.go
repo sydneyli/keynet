@@ -319,7 +319,7 @@ func (n PBFTNode) signalReady(cluster ClusterConfig) {
 	}
 
 	message := ReadyMsg(cluster.Primary.Id)
-	err := sendRpc(cluster.Primary.Id, util.GetHostname(primary.Host, primary.Port), "PBFTNode.Ready", &message, nil)
+	err := sendRpc(cluster.Primary.Id, util.GetHostname(primary.Host, primary.Port), "PBFTNode.Ready", &message, nil, -1)
 	if err != nil {
 		n.Error("%v", err)
 	}
@@ -351,14 +351,14 @@ func (n *PBFTNode) Commit(req *Commit, res *Ack) error {
 // ** RPC ** //
 func bcastRpc(peers map[int]string, rpcName string, message interface{}) {
 	for i, p := range peers {
-		err := sendRpc(i, p, rpcName, message, nil)
+		err := sendRpc(i, p, rpcName, message, nil, 10)
 		if err != nil {
 			plog.Fatalf("[Node %d] %v", machineId, err)
 		}
 	}
 }
 
-func sendRpc(peerId int, hostName string, rpcName string, message interface{}, response interface{}) error {
+func sendRpc(peerId int, hostName string, rpcName string, message interface{}, response interface{}, retries int) error {
 	plog.Infof("[Node %d] Sending RPC (%s) to Node %d", machineId, rpcName, peerId)
-	return util.SendRpc(hostName, ENDPOINT, rpcName, message, response)
+	return util.SendRpc(hostName, ENDPOINT, rpcName, message, response, retries)
 }

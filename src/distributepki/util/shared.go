@@ -9,9 +9,7 @@ func GetHostname(host string, port int) string {
 	return host + ":" + strconv.Itoa(port)
 }
 
-const rpcRetries int = 10
-
-func SendRpc(hostName string, endpoint string, rpcFunction string, message interface{}, response interface{}) error {
+func SendRpc(hostName string, endpoint string, rpcFunction string, message interface{}, response interface{}, rpcRetries int) error {
 
 	rpcClient, err := rpc.DialHTTPPath("tcp", hostName, endpoint)
 	for nRetries := 0; err != nil && rpcRetries < nRetries; nRetries++ {
