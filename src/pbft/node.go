@@ -6,7 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/rpc"
-	"time"
+	// "time"
 )
 
 var machineId int
@@ -105,13 +105,6 @@ func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- *PBFTNode) {
 		for i := 0; i < len(cluster.Nodes)-1; i++ {
 			<-node.startup
 		}
-		// Try to commit a fake request
-		fakeRequest := ClientRequest{
-			Op:        "bingo",
-			Timestamp: time.Now(),
-			Client:    nil,
-		}
-		node.handleClientRequest(&fakeRequest)
 	} else {
 		node.signalReady(cluster)
 	}
@@ -234,16 +227,6 @@ func (n PBFTNode) ensureMapping(num SlotId) Slot {
 		n.log[num] = slot
 	}
 	return slot
-}
-
-func (n PBFTNode) handleDebug(debug *DebugMessage) {
-	switch op := debug.Op; op {
-	case SLOW:
-	case PUT:
-	case GET:
-	case DOWN:
-	case UP:
-	}
 }
 
 func (n PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {

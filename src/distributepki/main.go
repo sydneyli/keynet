@@ -13,7 +13,9 @@ import (
 	"os/exec"
 	"os/signal"
 	"pbft"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/coreos/pkg/capnslog"
 )
@@ -78,7 +80,7 @@ func StartCluster(initialKeyTable *map[string]string, cluster *pbft.ClusterConfi
 	for _, n := range cluster.Nodes {
 		id := n.Id
 		if debug {
-			// TODO: append "debug" flag to cmd
+			// TODO (sydli): Take debug flag into account
 		}
 		cmd := exec.Command("./distributepki", "-id", fmt.Sprintf("%d", id))
 		cmd.Stdout = os.Stdout
@@ -101,8 +103,10 @@ func StartCluster(initialKeyTable *map[string]string, cluster *pbft.ClusterConfi
 	}
 }
 
+// TODO (sydli): Dedupe with sendRPC in pbft/ package... maybe in utils or something?
 func rpcTo(machineId int, hostName string, rpcName string, message interface{}, response interface{}, retries int) error {
 	log.Infof("[REPL] Sending rpc to %d", machineId)
+	// TODO (sydli): PBFT endpoint should be a constant somewhere, probably.
 	rpcClient, err := rpc.DialHTTPPath("tcp", hostName, "/pbft")
 	for nRetries := 0; err != nil && retries < nRetries; nRetries++ {
 		rpcClient, err = rpc.DialHTTPPath("tcp", hostName, "/pbft")
@@ -116,9 +120,9 @@ func rpcTo(machineId int, hostName string, rpcName string, message interface{}, 
 		return result.Error
 	}
 	return nil
-
 }
 
+// TODO (sydli): the below needs a massive cleanup
 func StartRepl(cluster *pbft.ClusterConfig) {
 	for {
 		reader := bufio.NewReader(os.Stdin)
@@ -128,38 +132,62 @@ func StartRepl(cluster *pbft.ClusterConfig) {
 		if len(cmdList) == 0 {
 			continue
 		}
-		args := cmdList[1:]
+		// args := cmdList[1:]
 		response := new(pbft.Ack)
-		var primary pbft.NodeConfig
-		for _, n := range cluster.Nodes {
-			if n.Id == cluster.Primary.Id {
-				primary = n
-				break
-			}
-		}
-
+		var message pbft.DebugMessage
+		var id int
 		switch cmd := cmdList[0]; cmd {
 		case "exit":
 			return
-		case "get":
-			message := pbft.DebugMessage{
-				Op: pbft.GET,
+		case "commit":
+			message = pbft.DebugMessage{
+				Op: pbft.PUT,
+				Request: pbft.ClientRequest{
+					Op:        "bingo",
+					Timestamp: time.Now(),
+					Client:    nil,
+				},
 			}
-			rpcTo(
-				primary.Id,
-				util.GetHostname(primary.Host, primary.Port),
-				"PBFTNode.Debug",
-				&message,
-				response,
-				10)
-			fmt.Println(response)
-		case "put":
-			fmt.Println(args)
-		case "slow":
-			fmt.Println(args)
+			id = cluster.Primary.Id
+		case "up":
+			if i, err := strconv.Atoi(cmdList[1]); err == nil {
+				id = i
+			} else {
+				fmt.Println("Please specify which node you want to bring up!")
+				return
+			}
+			message = pbft.DebugMessage{
+				Op: pbft.UP,
+			}
 		case "down":
-			fmt.Println(args)
+			if i, err := strconv.Atoi(cmdList[1]); err == nil {
+				id = i
+			} else {
+				fmt.Println("Please specify which node you want to take down!")
+				return
+			}
+			message = pbft.DebugMessage{
+				Op: pbft.DOWN,
+			}
 		}
+		var to pbft.NodeConfig
+		for _, n := range cluster.Nodes {
+			if n.Id == id {
+				to = n
+				break
+			}
+		}
+		err := rpcTo(
+			id,
+			util.GetHostname(to.Host, to.Port),
+			"PBFTNode.Debug",
+			&message,
+			response,
+			10)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Println(response)
 	}
 }
 
