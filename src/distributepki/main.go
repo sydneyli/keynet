@@ -61,7 +61,7 @@ func main() {
 	initialKeyTable := make(map[string]string)
 	for _, kp := range initialKeys {
 		initialKeyTable[string(kp.Alias)] = string(kp.Key)
-		log.Infof("    %v => %v", kp.Alias, kp.Key)
+		log.Debugf("    %v => %v", kp.Alias, kp.Key)
 	}
 
 	if *cluster {
@@ -176,9 +176,9 @@ func StartNode(id int, initialKeyTable *map[string]string, cluster *pbft.Cluster
 	go pbft.StartNode(thisNode, *cluster, ready)
 	node := <-ready
 	if node != nil {
-		log.Info("PBFT node started successfully!")
+		log.Infof("Node %d started successfully!", id)
 	} else {
-		log.Fatal("PBFT node/cluster failed to start.")
+		log.Fatalf("Node %d failed to start.", id)
 	}
 
 	keyNode := NewKeyNode(

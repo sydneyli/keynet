@@ -6,7 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/rpc"
-	"time"
+	//"time"
 )
 
 var machineId int
@@ -106,12 +106,14 @@ func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- *PBFTNode) {
 			<-node.startup
 		}
 		// Try to commit a fake request
-		fakeRequest := ClientRequest{
-			Op:        "bingo",
-			Timestamp: time.Now(),
-			Client:    nil,
-		}
-		node.handleClientRequest(&fakeRequest)
+		/*
+			fakeRequest := ClientRequest{
+				Op:        "bingo",
+				Timestamp: time.Now(),
+				Client:    nil,
+			}
+			node.handleClientRequest(&fakeRequest)
+		*/
 	} else {
 		node.signalReady(cluster)
 	}
@@ -395,7 +397,7 @@ func bcastRPC(peers map[int]string, rpcName string, message interface{}, respons
 }
 
 func sendRPC(peerId int, hostName string, rpcName string, message interface{}, response interface{}, retries int) error {
-	plog.Infof("[Node %d] Sending rpc to %d", machineId, peerId)
+	plog.Infof("[Node %d] Sending RPC %s to %d", machineId, rpcName, peerId)
 	rpcClient, err := rpc.DialHTTPPath("tcp", hostName, "/pbft")
 	for nRetries := 0; err != nil && retries < nRetries; nRetries++ {
 		rpcClient, err = rpc.DialHTTPPath("tcp", hostName, "/pbft")
