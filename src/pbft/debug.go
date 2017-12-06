@@ -18,7 +18,7 @@ func (n *PBFTNode) Debug(req *DebugMessage, res *Ack) error {
 	return nil
 }
 
-func (n PBFTNode) blockUntilUp() {
+func (n *PBFTNode) blockUntilUp() {
 	for {
 		msg := <-n.debugChannel
 		if msg.Op == UP {
@@ -28,7 +28,7 @@ func (n PBFTNode) blockUntilUp() {
 	}
 }
 
-func (n PBFTNode) handleDebug(debug *DebugMessage) {
+func (n *PBFTNode) handleDebug(debug *DebugMessage) {
 	switch op := debug.Op; op {
 	case PUT:
 		n.Log("PUT %+v", debug.Request)

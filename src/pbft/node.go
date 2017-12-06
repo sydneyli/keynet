@@ -111,25 +111,25 @@ func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- *PBFTNode) {
 	ready <- &node
 }
 
-func (n PBFTNode) Log(format string, args ...interface{}) {
+func (n *PBFTNode) Log(format string, args ...interface{}) {
 	args = append([]interface{}{n.id}, args...)
 	plog.Infof("[Node %d] "+format, args...)
 }
 
-func (n PBFTNode) Error(format string, args ...interface{}) {
+func (n *PBFTNode) Error(format string, args ...interface{}) {
 	args = append([]interface{}{n.id}, args...)
 	plog.Fatalf("[Node %d] "+format, args...)
 }
 
-func (n PBFTNode) Failure() chan error {
+func (n *PBFTNode) Failure() chan error {
 	return n.errorChannel
 }
 
-func (n PBFTNode) Committed() chan *string {
+func (n *PBFTNode) Committed() chan *string {
 	return n.committedChannel
 }
 
-func (n PBFTNode) Propose(opcode int, s string) {
+func (n *PBFTNode) Propose(opcode int, s string) {
 
 	if !n.primary {
 		return // no proposals for non-primary nodes
@@ -142,14 +142,14 @@ func (n PBFTNode) Propose(opcode int, s string) {
 	n.requestChannel <- request
 }
 
-func (n PBFTNode) GetCheckpoint() (interface{}, error) {
+func (n *PBFTNode) GetCheckpoint() (interface{}, error) {
 	// TODO: implement
 	return nil, nil
 }
 
 // does appropriate actions after receivin a client request
 // i.e. send out preprepares and stuff
-func (n PBFTNode) handleClientRequest(request *ClientRequest) {
+func (n *PBFTNode) handleClientRequest(request *ClientRequest) {
 	if request == nil {
 		return
 	}
@@ -181,7 +181,7 @@ func (n PBFTNode) handleClientRequest(request *ClientRequest) {
 	go bcastRpc(n.peermap, "PBFTNode.PrePrepare", &fullMessage)
 }
 
-func (n PBFTNode) handleMessages() {
+func (n *PBFTNode) handleMessages() {
 	for {
 		select {
 		case msg := <-n.debugChannel:
@@ -203,7 +203,7 @@ func (n PBFTNode) handleMessages() {
 }
 
 // ensure mapping from SlotId exists in PBFTNode
-func (n PBFTNode) ensureMapping(num SlotId) Slot {
+func (n *PBFTNode) ensureMapping(num SlotId) Slot {
 	slot, ok := n.log[num]
 	if !ok {
 		slot = Slot{
@@ -225,7 +225,7 @@ func (n PBFTNode) ensureMapping(num SlotId) Slot {
 	return slot
 }
 
-func (n PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
+func (n *PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
 	preprepareMessage := preprepare.PrePrepareMessage
 	prepare := Prepare{
 		Number:  preprepareMessage.Number,
@@ -245,17 +245,17 @@ func (n PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
 	go bcastRpc(n.peermap, "PBFTNode.Prepare", &prepare)
 }
 
-func (n PBFTNode) isPrepared(slot Slot) bool {
+func (n *PBFTNode) isPrepared(slot Slot) bool {
 	// # Prepares received >= 2f = 2 * ((N - 1) / 3)
 	return slot.preprepare != nil && len(slot.prepares) >= 2*(len(n.peermap)/3)
 }
 
-func (n PBFTNode) isCommitted(slot Slot) bool {
+func (n *PBFTNode) isCommitted(slot Slot) bool {
 	// # Commits received >= 2f + 1 = 2 * ((N - 1) / 3) + 1
 	return n.isPrepared(slot) && len(slot.commits) >= 2*(len(n.peermap)/3)+1
 }
 
-func (n PBFTNode) handlePrepare(message *Prepare) {
+func (n *PBFTNode) handlePrepare(message *Prepare) {
 	// TODO: validate prepare message
 	/*
 		// TODO: come back and fix this
@@ -283,7 +283,7 @@ func (n PBFTNode) handlePrepare(message *Prepare) {
 	}
 }
 
-func (n PBFTNode) handleCommit(message *Commit) {
+func (n *PBFTNode) handleCommit(message *Commit) {
 	// TODO: validate commit message
 	/*
 		// TODO: come back and fix validation
@@ -308,7 +308,7 @@ func (n PBFTNode) handleCommit(message *Commit) {
 
 // ** Startup ** //
 
-func (n PBFTNode) signalReady(cluster ClusterConfig) {
+func (n *PBFTNode) signalReady(cluster ClusterConfig) {
 
 	var primary NodeConfig
 	for _, n := range cluster.Nodes {
@@ -360,5 +360,5 @@ func bcastRpc(peers map[int]string, rpcName string, message interface{}) {
 
 func sendRpc(peerId int, hostName string, rpcName string, message interface{}, response interface{}, retries int) error {
 	plog.Infof("[Node %d] Sending RPC (%s) to Node %d", machineId, rpcName, peerId)
-	return util.SendRpc(hostName, ENDPOINT, rpcName, message, response, retries)
+	return util.SendRpc(hostName, ENDPOINT, rpcName, message, response, retries, 0)
 }
