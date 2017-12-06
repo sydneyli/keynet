@@ -6,7 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/rpc"
-	"time"
+	// "time"
 )
 
 var machineId int
@@ -232,16 +232,6 @@ func (n PBFTNode) ensureMapping(num SlotId) Slot {
 		n.log[num] = slot
 	}
 	return slot
-}
-
-func (n PBFTNode) handleDebug(debug *DebugMessage) {
-	switch op := debug.Op; op {
-	case SLOW:
-	case PUT:
-	case GET:
-	case DOWN:
-	case UP:
-	}
 }
 
 func (n PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {

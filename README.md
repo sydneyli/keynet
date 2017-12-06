@@ -64,10 +64,19 @@ be included in a json file to initialize the key store:
 ]
 ```
 
-Finally, to start up the cluster of `n` nodes, run `n` instances of
-```
-./distributepki --id i
-```
+Finally, to start up the cluster of `n` nodes acording to `cluster.json`, run
+ `./distributepki -cluster`.
+
+## Debugging
+If you enable debugging on your cluster (on by default right now), you can
+you can also run a debugging REPL with just `./distributepki -debug`. The
+REPL supports the following commands:
+  `commit`    tells the primary to commit a no-op
+  `down <id>` takes down the node with the specified id, until `up <id>` is
+              called
+  `up <id>`   brings the node with the specified id back up
+  `exit`      quits the repl
+
 ## Client usage
 
 To start up the client server, go to the `client/` directory and run `./client
