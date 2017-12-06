@@ -2,10 +2,14 @@ package pbft
 
 import (
 	"distributepki/util"
+
 	"net"
 	"net/http"
 	"net/rpc"
+	"time"
 )
+
+var machineId int
 
 type PBFTNode struct {
 	id      int
@@ -13,9 +17,11 @@ type PBFTNode struct {
 	port    int
 	primary bool
 	peers   []string
+	peermap map[int]string // id => hostname
 	startup chan bool
 
 	errorChannel      chan error
+	debugChannel      chan *DebugMessage
 	requestChannel    chan *ClientRequest
 	preprepareChannel chan *PrePrepareFull
 	prepareChannel    chan *Prepare
@@ -29,15 +35,15 @@ type PBFTNode struct {
 }
 
 type SlotId struct {
-	viewNumber int
-	seqNumber  int
+	ViewNumber int
+	SeqNumber  int
 }
 
 func (slot SlotId) Before(other SlotId) bool {
-	if slot.viewNumber == other.viewNumber {
-		return slot.seqNumber < other.seqNumber
+	if slot.ViewNumber == other.ViewNumber {
+		return slot.SeqNumber < other.SeqNumber
 	}
-	return slot.viewNumber < other.viewNumber
+	return slot.ViewNumber < other.ViewNumber
 }
 
 type Slot struct {
@@ -52,17 +58,19 @@ type ReadyMsg int
 type ReadyResp bool
 
 func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- *PBFTNode) {
-
 	peers := make([]string, 0)
+	peermap := make(map[int]string)
 	for _, p := range cluster.Nodes {
 		if p.Id != host.Id {
+			peermap[p.Id] = util.GetHostname(p.Host, p.Port)
 			peers = append(peers, util.GetHostname(p.Host, p.Port))
 		}
 	}
 	initSlotId := SlotId{
-		viewNumber: 0,
-		seqNumber:  0,
+		ViewNumber: 0,
+		SeqNumber:  0,
 	}
+	machineId = host.Id
 
 	node := PBFTNode{
 		id:                  host.Id,
@@ -70,7 +78,9 @@ func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- *PBFTNode) {
 		port:                host.Port,
 		primary:             cluster.Primary.Id == host.Id,
 		peers:               peers,
+		peermap:             peermap,
 		startup:             make(chan bool, len(cluster.Nodes)-1),
+		debugChannel:        make(chan *DebugMessage),
 		errorChannel:        make(chan error),
 		requestChannel:      make(chan *ClientRequest, 10), // some nice inherent rate limiting
 		preprepareChannel:   make(chan *PrePrepareFull),
@@ -87,7 +97,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- *PBFTNode) {
 
 	listener, e := net.Listen("tcp", util.GetHostname("", node.port))
 	if e != nil {
-		plog.Fatal("Listen error:", e)
+		node.Error("Listen error: %v", e)
 	}
 	go http.Serve(listener, nil)
 
@@ -95,11 +105,26 @@ func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- *PBFTNode) {
 		for i := 0; i < len(cluster.Nodes)-1; i++ {
 			<-node.startup
 		}
+		// Try to commit a fake request
+		fakeRequest := ClientRequest{
+			Op:        "bingo",
+			Timestamp: time.Now(),
+			Client:    nil,
+		}
+		node.handleClientRequest(&fakeRequest)
 	} else {
 		node.signalReady(cluster)
 	}
 	go node.handleMessages()
 	ready <- &node
+}
+
+func (n PBFTNode) Log(format string, args ...interface{}) {
+	plog.Infof("[Node %d] "+format, n.id, args)
+}
+
+func (n PBFTNode) Error(format string, args ...interface{}) {
+	plog.Fatalf("[Node %d] "+format, n.id, args)
 }
 
 func (n PBFTNode) Failure() chan error {
@@ -137,8 +162,8 @@ func (n PBFTNode) handleClientRequest(request *ClientRequest) {
 
 	n.sequenceNumber += 1
 	id := SlotId{
-		viewNumber: n.viewNumber,
-		seqNumber:  n.sequenceNumber,
+		ViewNumber: n.viewNumber,
+		SeqNumber:  n.sequenceNumber,
 	}
 
 	fullMessage := PrePrepareFull{
@@ -155,15 +180,16 @@ func (n PBFTNode) handleClientRequest(request *ClientRequest) {
 		commits:    make(map[int]*Commit),
 	}
 
-	responses := make([]interface{}, len(n.peers))
-	for i := 0; i < len(n.peers); i++ {
+	responses := make(map[int]interface{})
+	for i, _ := range n.peermap {
 		responses[i] = new(Ack)
 	}
-	plog.Infof("Sending PrePrepare messages for %+v", id)
-	bcastRPC(n.peers, "PBFTNode.PrePrepare", &fullMessage, responses, 10)
+	n.Log("Sending Preprepare messages for %+v", id)
+	bcastRPC(n.peermap, "PBFTNode.PrePrepare", &fullMessage, responses, 10)
 
 	for i, r := range responses {
-		plog.Infof("PrePrepare response %d: %+v", i, r)
+		n.Log("Preprepare response %d: %+v", i, r)
+		bcastRPC(n.peermap, "PBFTNode.PrePrepare", &fullMessage, responses, 10)
 	}
 }
 
@@ -171,6 +197,8 @@ func (n PBFTNode) handleClientRequest(request *ClientRequest) {
 func (n PBFTNode) handleMessages() {
 	for {
 		select {
+		case msg := <-n.debugChannel:
+			n.handleDebug(msg)
 		case msg := <-n.preprepareChannel:
 			if !n.primary { // potential view change if fails?
 				n.handlePrePrepare(msg)
@@ -208,8 +236,18 @@ func (n PBFTNode) ensureMapping(num SlotId) Slot {
 	return slot
 }
 
+func (n PBFTNode) handleDebug(debug *DebugMessage) {
+	switch op := debug.Op; op {
+	case SLOW:
+	case PUT:
+	case GET:
+	case DOWN:
+	case UP:
+	}
+}
+
 func (n PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
-	plog.Infof("PrePrepare detected %b", preprepare)
+	n.Log("PrePrepare detected %b", preprepare)
 	preprepareMessage := preprepare.PrePrepareMessage
 	prepare := Prepare{
 		Number:  preprepareMessage.Number,
@@ -226,15 +264,16 @@ func (n PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
 	matchingSlot.preprepare = preprepare
 	n.log[preprepareMessage.Number] = matchingSlot
 
+	n.Log("PREPREPARED %+v", prepare.Number)
 	// broadcast prepares
-	responses := make([]interface{}, len(n.peers))
-	for i := 0; i < len(n.peers); i++ {
+	responses := make(map[int]interface{})
+	for i, _ := range n.peermap {
 		responses[i] = new(Ack)
 	}
-	bcastRPC(n.peers, "PBFTNode.Prepare", &prepare, responses, 10)
+	bcastRPC(n.peermap, "PBFTNode.Prepare", &prepare, responses, 10)
 
 	for i, r := range responses {
-		plog.Infof("Prepare response %d: %+v", i, r)
+		n.Log("Prepare response %d: %+v", i, r)
 	}
 }
 
@@ -263,24 +302,24 @@ func (n PBFTNode) handlePrepare(message *Prepare) {
 	n.log[message.Number] = slot
 
 	if n.isPrepared(slot) {
-		plog.Infof("NODE %d PREPARED %+v", n.id, message.Number)
+		n.Log("PREPARED %+v", message.Number)
 		commit := Commit{
 			Number:  message.Number,
 			Message: message.Message,
 			Node:    n.id,
 		}
 		// broadcast commit
-		responses := make([]interface{}, len(n.peers))
-		for i := 0; i < len(n.peers); i++ {
+		responses := make(map[int]interface{})
+		for i, _ := range n.peermap {
 			responses[i] = new(Ack)
 		}
-		bcastRPC(n.peers, "PBFTNode.Commit", &commit, responses, 10)
+		bcastRPC(n.peermap, "PBFTNode.Commit", &commit, responses, 10)
 	}
 }
 
 func (n PBFTNode) handleCommit(message *Commit) {
 	// TODO: validate commit message
-	plog.Infof("Received Commit %b", message)
+	n.Log("Received Commit %b", message)
 	/*
 		// TODO: come back and fix validation
 		if message.Number.Before(n.mostRecentCommitted) {
@@ -311,9 +350,9 @@ func (n PBFTNode) signalReady(cluster ClusterConfig) {
 	}
 
 	message := ReadyMsg(cluster.Primary.Id)
-	err := sendRPC(util.GetHostname(primary.Host, primary.Port), "PBFTNode.Ready", &message, new(ReadyResp), -1)
+	err := sendRPC(cluster.Primary.Id, util.GetHostname(primary.Host, primary.Port), "PBFTNode.Ready", &message, new(ReadyResp), -1)
 	if err != nil {
-		plog.Fatal(err)
+		n.Error("%v", err)
 	}
 }
 
@@ -346,17 +385,17 @@ func (n *PBFTNode) Commit(req *Commit, res *Ack) error {
 // ** RPC ** //
 // both currently sync
 
-func bcastRPC(peers []string, rpcName string, message interface{}, response []interface{}, retries int) {
+func bcastRPC(peers map[int]string, rpcName string, message interface{}, response map[int]interface{}, retries int) {
 	for i, p := range peers {
-		err := sendRPC(p, rpcName, message, response[i], retries)
+		err := sendRPC(i, p, rpcName, message, response[i], retries)
 		if err != nil {
-			plog.Fatal(err)
+			plog.Fatalf("[Node %d] %v", machineId, err)
 		}
 	}
 }
 
-func sendRPC(hostName string, rpcName string, message interface{}, response interface{}, retries int) error {
-	plog.Infof("Sending rpc to %s", hostName)
+func sendRPC(peerId int, hostName string, rpcName string, message interface{}, response interface{}, retries int) error {
+	plog.Infof("[Node %d] Sending rpc to %d", machineId, peerId)
 	rpcClient, err := rpc.DialHTTPPath("tcp", hostName, "/pbft")
 	for nRetries := 0; err != nil && retries < nRetries; nRetries++ {
 		rpcClient, err = rpc.DialHTTPPath("tcp", hostName, "/pbft")
