@@ -28,7 +28,7 @@ type PBFTNode struct {
 
 	// client library channels
 	errorChannel     chan error
-	committedChannel chan *string
+	committedChannel chan *Operation
 
 	// local
 	KeyRequest chan *KeyRequest // hostname
@@ -125,6 +125,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		hostToPeer:          hostToPeer,
 		cluster:             cluster,
 		debugChannel:        make(chan *DebugMessage),
+		committedChannel:    make(chan *Operation),
 		errorChannel:        make(chan error),
 		requestChannel:      make(chan *ClientRequest, 10), // some nice inherent rate limiting
 		preprepareChannel:   make(chan *PrePrepareFull),
@@ -290,6 +291,7 @@ func (n *PBFTNode) handleCommit(message *Commit) {
 		// TODO: try to execute as many sequential queries as possible and
 		// then reply to the clients via committedChannel
 		n.Log("COMMITTED %+v", message.Number)
+		n.Committed() <- &Operation{Opcode: message.Message.Opcode, Op: message.Message.Op}
 	}
 }
 
@@ -314,18 +316,19 @@ func (n PBFTNode) Failure() chan error {
 	return n.errorChannel
 }
 
-func (n PBFTNode) Committed() chan *string {
+func (n PBFTNode) Committed() chan *Operation {
 	return n.committedChannel
 }
 
-func (n PBFTNode) Propose(opcode int, s string) {
+func (n PBFTNode) Propose(operation Operation) {
 	if !n.isPrimary() {
 		// TODO: Relay request to primary!
 		return // no proposals for non-primary nodes
 	}
 	request := new(ClientRequest)
-	request.Opcode = opcode
-	request.Op = s
+	// TODO: put Operation type in request (does this require custome serialization stuff)
+	request.Opcode = operation.Opcode
+	request.Op = operation.Op
 	n.requestChannel <- request
 }
 

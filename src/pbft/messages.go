@@ -5,6 +5,11 @@ import (
 	"time"
 )
 
+type Operation struct {
+	Opcode int
+	Op     string
+}
+
 // REQUEST:
 // op, timestamp, client addr (signed by client)
 type ClientRequest struct {

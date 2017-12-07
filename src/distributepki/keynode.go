@@ -10,6 +10,13 @@ import (
 	"net/http"
 	"net/rpc"
 	"pbft"
+	"time"
+
+	"github.com/coreos/pkg/capnslog"
+)
+
+var (
+	plog = capnslog.NewPackageLogger("github.com/sydli/distributePKI", "keynode")
 )
 
 type KeyNode struct {
@@ -34,13 +41,17 @@ func (kn *KeyNode) serveKeyRequests() {
 	}
 }
 
-func NewKeyNode(node *pbft.PBFTNode, store *keystore.Keystore) KeyNode {
-	n := KeyNode{
-		consensusNode: node,
-		store:         store,
+func (kn *KeyNode) testPropose() {
+	alias := keystore.Alias("testalias")
+	<-time.NewTimer(time.Second * 2).C
+	kn.CreateKey(&server.Create{alias, keystore.Key("testkey"), time.Now(), nil, "sig"}, nil)
+	<-time.NewTimer(time.Second * 2).C
+	if found, key := kn.LookupKey(&server.Lookup{alias, time.Now(), nil, "sig"}, nil); found {
+		plog.Infof("Lookup got key: %v for alias %v", key, alias)
+	} else {
+		plog.Infof("Lookup key failed for alias %v", alias)
 	}
-	go n.serveKeyRequests()
-	return n
+
 }
 
 func (kn *KeyNode) StartRPC(rpcPort int) {
@@ -49,12 +60,12 @@ func (kn *KeyNode) StartRPC(rpcPort int) {
 	server.HandleHTTP("/public", "/debug/public")
 	l, e := net.Listen("tcp", util.GetHostname("", rpcPort))
 	if e != nil {
-		log.Fatal("listen error:", e)
+		plog.Fatal("listen error:", e)
 	}
 	go http.Serve(l, nil)
 }
 
-func StartKeyNode(config pbft.NodeConfig, cluster *pbft.ClusterConfig, store *keystore.Keystore) *KeyNode {
+func SpawnKeyNode(config pbft.NodeConfig, cluster *pbft.ClusterConfig, store *keystore.Keystore) *KeyNode {
 	node := pbft.StartNode(config, *cluster)
 	if node == nil {
 		return nil
@@ -64,61 +75,87 @@ func StartKeyNode(config pbft.NodeConfig, cluster *pbft.ClusterConfig, store *ke
 		consensusNode: node,
 		store:         store,
 	}
-	go keyNode.serveKeyRequests()
 
+	go keyNode.handleUpdates()
+	go keyNode.serveKeyRequests()
+	go keyNode.testPropose()
 	return &keyNode
+}
+
+func (kn *KeyNode) handleUpdates() {
+	for {
+		commit := <-kn.consensusNode.Committed()
+		kn.handleCommit(commit)
+	}
+}
+
+func (kn *KeyNode) handleCommit(operation *pbft.Operation) {
+	decoder := gob.NewDecoder(bytes.NewReader([]byte(operation.Op)))
+	switch operation.Opcode {
+	case OP_CREATE:
+		var create server.Create
+		decoder.Decode(&create)
+		plog.Infof("Commit create to keystore: %v", create)
+		kn.store.CreateKey(create.Alias, create.Key)
+	case OP_UPDATE:
+		var update server.Update
+		decoder.Decode(&update)
+		plog.Infof("Commit update to keystore: %v", update)
+		// TODO: Update keystore
+	}
 }
 
 func (kn *KeyNode) CreateKey(args *server.Create, reply *server.Ack) error {
 
-	log.Info("Create Key: %+v", args)
+	plog.Info("Create Key: %+v", args)
 
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(args); err != nil {
-		log.Fatal(err)
+		plog.Fatal(err)
 	}
 
-	kn.consensusNode.Propose(OP_CREATE, buf.String())
+	kn.consensusNode.Propose(pbft.Operation{Opcode: OP_CREATE, Op: buf.String()})
 
+	go kn.handleUpdates()
 	// TODO err := ks.CreateKey(args.Alias, args.Key, buf.String())
 	// reply.Success = err == nil
 	// return err
-	reply.Success = true
+	// reply.Success = true
 	return nil
 }
 
 func (kn *KeyNode) UpdateKey(args *server.Update, reply *server.Ack) error {
 
-	log.Info("Update Key: %+v", args)
+	plog.Info("Update Key: %+v", args)
 
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(args); err != nil {
-		log.Fatal(err)
+		plog.Fatal(err)
 	}
 
-	kn.consensusNode.Propose(OP_UPDATE, buf.String())
+	kn.consensusNode.Propose(pbft.Operation{Opcode: OP_UPDATE, Op: buf.String()})
 
 	// TODO err := ks.UpdateKey(args.Alias, args.Update, buf.String())
 	// reply.Success = err == nil
 	// return err
-	reply.Success = true
+	// reply.Success = true
 	return nil
 }
 
-func (kn *KeyNode) LookupKey(args *server.Lookup, reply *server.Ack) error {
+func (kn *KeyNode) LookupKey(args *server.Lookup, reply *server.Ack) (bool, keystore.Key) {
 
-	log.Info("Lookup Key: %+v", args)
+	plog.Info("Lookup Key: %+v", args)
 
-	var buf bytes.Buffer
-	if err := gob.NewEncoder(&buf).Encode(args); err != nil {
-		log.Fatal(err)
-	}
+	// var buf bytes.Buffer
+	// if err := gob.NewEncoder(&buf).Encode(args); err != nil {
+	// 	plog.Fatal(err)
+	// }
 
-	kn.consensusNode.Propose(OP_LOOKUP, buf.String())
+	// kn.consensusNode.Propose(pbft.Operation{Opcode: OP_LOOKUP, Op: buf.String()})
 
 	//TODO err := ks.LookupKey(args.Alias, buf.String())
 	// reply.Success = err == nil
 	// return err
-	reply.Success = true
-	return nil
+	// reply.Success = true
+	return kn.store.LookupKey(args.Alias)
 }

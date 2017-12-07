@@ -123,6 +123,7 @@ func StartRepl(cluster *pbft.ClusterConfig) {
 			message = pbft.DebugMessage{
 				Op: pbft.PUT,
 				Request: pbft.ClientRequest{
+					Opcode:    OP_CREATE,
 					Op:        "bingo",
 					Id:        time.Now().UnixNano(),
 					Timestamp: time.Now(),
@@ -185,7 +186,7 @@ func StartNode(id pbft.NodeId, initialKeyTable *map[string]string, cluster *pbft
 	store := keystore.NewKeystore(initialKeyTable)
 
 	log.Infof("Starting node %d (%s)...", id, util.GetHostname(thisNode.Host, thisNode.Port))
-	node := StartKeyNode(thisNode, cluster, store)
+	node := SpawnKeyNode(thisNode, cluster, store)
 	if node == nil {
 		log.Fatalf("Node %d failed to start.", id)
 		return

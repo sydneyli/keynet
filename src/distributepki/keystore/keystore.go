@@ -56,7 +56,7 @@ func NewKeystore(initial *map[string]string) *Keystore {
 	return &Keystore{keys: &syncMap}
 }
 
-func (ks *Keystore) CreateKey(alias Alias, key Key, clientMessage string) error {
+func (ks *Keystore) CreateKey(alias Alias, key Key) error {
 	/*
 		if _, ok := ks.store.Get(string(alias)); ok {
 			return AliasAlreadyExists(alias)
@@ -65,10 +65,12 @@ func (ks *Keystore) CreateKey(alias Alias, key Key, clientMessage string) error 
 		plog.Infof("Create Key: %v for Alias: %v", key, alias)
 		ks.store.Propose("Create", clientMessage)
 	*/
+	plog.Infof("Store key %v for alias %v", key, alias)
+	ks.keys.Store(alias, key)
 	return nil
 }
 
-func (ks *Keystore) UpdateKey(alias Alias, update KeyUpdate, clientMessage string) error {
+func (ks *Keystore) UpdateKey(alias Alias, update KeyUpdate) error {
 	/*
 		var oldKey Key
 		if val, ok := ks.store.Get(string(alias)); !ok {
@@ -84,15 +86,20 @@ func (ks *Keystore) UpdateKey(alias Alias, update KeyUpdate, clientMessage strin
 		plog.Infof("Update Alias: %v set Key: %v ", alias, update.key)
 		ks.store.Propose("Update", clientMessage)
 	*/
+	ks.keys.Store(alias, update.key)
 	return nil
 }
 
-func (ks *Keystore) LookupKey(alias Alias, clientMessage string) error {
+func (ks *Keystore) LookupKey(alias Alias) (bool, Key) {
 	/*
 		plog.Infof("Keystore Query for Alias: %v", alias)
 		ks.store.Propose("Lookup", clientMessage)
 	*/
-	return nil
+	plog.Info("Load ", alias)
+	if key, ok := ks.keys.Load(alias); ok {
+		return true, key.(Key)
+	}
+	return false, Key("")
 
 	// TODO: change once read-only transactions implemented
 	/*

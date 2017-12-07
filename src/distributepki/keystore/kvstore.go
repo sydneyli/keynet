@@ -15,14 +15,9 @@
 package keystore
 
 import (
-	"bytes"
-	"encoding/gob"
 	"encoding/json"
 	"pbft"
 	"sync"
-
-	"github.com/coreos/etcd/raft/raftpb"
-	"github.com/coreos/etcd/snap"
 )
 
 // a key-value store backed by raft
@@ -59,49 +54,49 @@ func (s *Kvstore) Get(key string) (string, bool) {
 }
 
 func (s *Kvstore) Put(k, v string) {
-	var buf bytes.Buffer
-	if err := gob.NewEncoder(&buf).Encode(kv{k, v}); err != nil {
-		plog.Fatal(err)
-	}
-	s.consensusNode.Propose(0, buf.String())
+	// var buf bytes.Buffer
+	// if err := gob.NewEncoder(&buf).Encode(kv{k, v}); err != nil {
+	// 	plog.Fatal(err)
+	// }
+	// s.consensusNode.Propose(0, buf.String())
 }
 
 func (s *Kvstore) readCommits(node *pbft.PBFTNode) {
-	for data := range node.Committed() {
-		if data == nil {
-			// done replaying log; new data incoming
-			// OR signaled to load snapshot
-			// snapshot, err := s.snapshotter.Load()
-			snapshot, err := node.GetCheckpoint()
-			if err == snap.ErrNoSnapshot {
-				return
-			}
-			if err != nil && err != snap.ErrNoSnapshot {
-				plog.Panic(err)
-			}
-			r_snapshot, ok := snapshot.(*raftpb.Snapshot)
-			if !ok {
-				plog.Panic("Incorrectly-typed snapshot")
-			}
-			plog.Printf("loading snapshot at term %d and index %d", r_snapshot.Metadata.Term, r_snapshot.Metadata.Index)
-			if err := s.recoverFromSnapshot(r_snapshot.Data); err != nil {
-				plog.Panic(err)
-			}
-			continue
-		}
+	// for data := range node.Committed() {
+	// 	if data == nil {
+	// 		// done replaying log; new data incoming
+	// 		// OR signaled to load snapshot
+	// 		// snapshot, err := s.snapshotter.Load()
+	// 		snapshot, err := node.GetCheckpoint()
+	// 		if err == snap.ErrNoSnapshot {
+	// 			return
+	// 		}
+	// 		if err != nil && err != snap.ErrNoSnapshot {
+	// 			plog.Panic(err)
+	// 		}
+	// 		r_snapshot, ok := snapshot.(*raftpb.Snapshot)
+	// 		if !ok {
+	// 			plog.Panic("Incorrectly-typed snapshot")
+	// 		}
+	// 		plog.Printf("loading snapshot at term %d and index %d", r_snapshot.Metadata.Term, r_snapshot.Metadata.Index)
+	// 		if err := s.recoverFromSnapshot(r_snapshot.Data); err != nil {
+	// 			plog.Panic(err)
+	// 		}
+	// 		continue
+	// 	}
 
-		var dataKv kv
-		dec := gob.NewDecoder(bytes.NewBufferString(*data))
-		if err := dec.Decode(&dataKv); err != nil {
-			plog.Fatalf("raftexample: could not decode message (%v)", err)
-		}
-		s.mu.Lock()
-		s.kvStore[dataKv.Key] = dataKv.Val
-		s.mu.Unlock()
-	}
-	if err, ok := <-node.Failure(); ok {
-		plog.Fatal(err)
-	}
+	// 	var dataKv kv
+	// 	dec := gob.NewDecoder(bytes.NewBufferString(*data))
+	// 	if err := dec.Decode(&dataKv); err != nil {
+	// 		plog.Fatalf("raftexample: could not decode message (%v)", err)
+	// 	}
+	// 	s.mu.Lock()
+	// 	s.kvStore[dataKv.Key] = dataKv.Val
+	// 	s.mu.Unlock()
+	// }
+	// if err, ok := <-node.Failure(); ok {
+	// 	plog.Fatal(err)
+	// }
 }
 
 func (s *Kvstore) MakeCheckpoint() (interface{}, error) {
