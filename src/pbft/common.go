@@ -15,7 +15,6 @@ var (
 type NodeId uint
 
 type ClusterConfig struct {
-	Primary  PrimaryConfig
 	Nodes    []NodeConfig
 	Endpoint string
 }
@@ -33,16 +32,12 @@ func (c ClusterConfig) LeaderFor(viewNumber int) NodeId {
 	return c.Nodes[hash(buf.Bytes())%uint(len(c.Nodes))].Id
 }
 
-type PrimaryConfig struct {
-	Id      NodeId
-	RpcPort int
-}
-
 type NodeConfig struct {
-	Id   NodeId
-	Host string
-	Port int
-	Key  string
+	Id         NodeId
+	Host       string
+	Port       int
+	ClientPort int
+	Key        string
 }
 
 type EndpointConfig struct {

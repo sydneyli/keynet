@@ -45,15 +45,15 @@ func main() {
 		}
 	}
 
-	serveHttpApi(primary.Host, config.Primary.RpcPort, *port)
+	serveHttpApi(primary.Host, config.Primary.ClientPort, *port)
 }
 
-func serveHttpApi(primaryHost string, primaryRpcPort int, port int) {
+func serveHttpApi(primaryHost string, primaryClientPort int, port int) {
 	plog.Info("API server going live at port " + strconv.Itoa(port) + "...")
 
-	c, err := rpc.DialHTTPPath("tcp", util.GetHostname(primaryHost, primaryRpcPort), "/public")
+	c, err := rpc.DialHTTPPath("tcp", util.GetHostname(primaryHost, primaryClientPort), "/public")
 	for err != nil {
-		c, err = rpc.DialHTTPPath("tcp", util.GetHostname(primaryHost, primaryRpcPort), "/public")
+		c, err = rpc.DialHTTPPath("tcp", util.GetHostname(primaryHost, primaryClientPort), "/public")
 	}
 
 	plog.Info("API server connected to primary")

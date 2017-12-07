@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"distributepki/keystore"
 	"distributepki/util"
 	"encoding/json"
@@ -12,9 +11,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"pbft"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/coreos/pkg/capnslog"
 )
@@ -68,7 +64,7 @@ func main() {
 	if *cluster {
 		StartCluster(&initialKeyTable, &config, *debug)
 	} else if *debug {
-		StartRepl(&config)
+		StartDebugRepl(&config)
 	} else {
 		StartNode(pbft.NodeId(*id), &initialKeyTable, &config)
 	}
@@ -102,79 +98,6 @@ func StartCluster(initialKeyTable *map[string]string, cluster *pbft.ClusterConfi
 	}
 }
 
-// TODO (sydli): the below needs a massive cleanup
-func StartRepl(cluster *pbft.ClusterConfig) {
-	for {
-		reader := bufio.NewReader(os.Stdin)
-		fmt.Print("> ")
-		cmdString, _ := reader.ReadString('\n')
-		cmdList := strings.Fields(cmdString)
-		if len(cmdList) == 0 {
-			continue
-		}
-		// args := cmdList[1:]
-		response := new(pbft.Ack)
-		var message pbft.DebugMessage
-		var id pbft.NodeId
-		switch cmd := cmdList[0]; cmd {
-		case "exit":
-			return
-		case "commit":
-			message = pbft.DebugMessage{
-				Op: pbft.PUT,
-				Request: pbft.ClientRequest{
-					Opcode:    OP_CREATE,
-					Op:        "bingo",
-					Id:        time.Now().UnixNano(),
-					Timestamp: time.Now(),
-					Client:    nil,
-				},
-			}
-			id = cluster.Primary.Id
-		case "up":
-			if i, err := strconv.Atoi(cmdList[1]); err == nil {
-				id = pbft.NodeId(i)
-			} else {
-				fmt.Println("Please specify which node you want to bring up!")
-				return
-			}
-			message = pbft.DebugMessage{
-				Op: pbft.UP,
-			}
-		case "down":
-			if i, err := strconv.Atoi(cmdList[1]); err == nil {
-				id = pbft.NodeId(i)
-			} else {
-				fmt.Println("Please specify which node you want to take down!")
-				return
-			}
-			message = pbft.DebugMessage{
-				Op: pbft.DOWN,
-			}
-		}
-		var to pbft.NodeConfig
-		for _, n := range cluster.Nodes {
-			if n.Id == id {
-				to = n
-				break
-			}
-		}
-		err := util.SendRpc(
-			util.GetHostname(to.Host, to.Port),
-			cluster.Endpoint, //TODO: listen on a different endpoint for debugging
-			"PBFTNode.Debug",
-			&message,
-			response,
-			10,
-			0,
-		)
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println(response)
-	}
-}
-
 func StartNode(id pbft.NodeId, initialKeyTable *map[string]string, cluster *pbft.ClusterConfig) {
 	var thisNode pbft.NodeConfig
 	for _, n := range cluster.Nodes {
@@ -193,9 +116,7 @@ func StartNode(id pbft.NodeId, initialKeyTable *map[string]string, cluster *pbft
 	}
 	log.Infof("Node %d started successfully!", id)
 
-	if thisNode.Id == cluster.Primary.Id {
-		node.StartRPC(cluster.Primary.RpcPort)
-	}
+	node.StartClientServer(thisNode.ClientPort)
 
 	<-node.consensusNode.Failure()
 }

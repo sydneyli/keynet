@@ -6,9 +6,11 @@ import (
 	"distributepki/server"
 	"distributepki/util"
 	"encoding/gob"
-	"net"
+	"encoding/json"
+	"io/ioutil"
+	// "net"
 	"net/http"
-	"net/rpc"
+	// "net/rpc"
 	"pbft"
 	"time"
 
@@ -51,18 +53,64 @@ func (kn *KeyNode) testPropose() {
 	} else {
 		plog.Infof("Lookup key failed for alias %v", alias)
 	}
-
 }
 
-func (kn *KeyNode) StartRPC(rpcPort int) {
-	server := rpc.NewServer()
-	server.Register(kn)
-	server.HandleHTTP("/public", "/debug/public")
-	l, e := net.Listen("tcp", util.GetHostname("", rpcPort))
-	if e != nil {
-		plog.Fatal("listen error:", e)
+// is there a better way to bind this variable to the inner fn...?
+func handlerWithContext(kn *KeyNode) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "GET":
+			var response keystore.Key
+			alias := keystore.Alias(r.URL.Query().Get("name"))
+			log.Print("HIIIII")
+			log.Print(alias)
+			if found, key := kn.LookupKey(&server.Lookup{alias, time.Now(), nil, "sig"}, nil); found {
+				response = key
+			} else {
+				http.Error(w, "Key not found", http.StatusBadRequest)
+			}
+			jsonBody, err := json.Marshal(response)
+			if err != nil {
+				http.Error(w, "Error converting results to json",
+					http.StatusInternalServerError)
+			}
+			w.Write(jsonBody)
+		case "POST":
+			alias := keystore.Alias(r.URL.Query().Get("name"))
+			keybytes, err := ioutil.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "oops", http.StatusInternalServerError)
+				return
+			}
+			key := keystore.Key(string(keybytes[:]))
+			log.Print("HIIIII")
+			log.Print(alias)
+			log.Print(key)
+			kn.CreateKey(&server.Create{alias, key, time.Now(), nil, "sig"}, nil)
+			response := "sent"
+			jsonBody, err := json.Marshal(response)
+			if err != nil {
+				http.Error(w, "Error converting results to json",
+					http.StatusInternalServerError)
+			}
+			w.Write(jsonBody)
+		}
 	}
-	go http.Serve(l, nil)
+}
+
+func (kn *KeyNode) StartClientServer(rpcPort int) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", handlerWithContext(kn))
+	log.Fatal(http.ListenAndServe(util.GetHostname("", rpcPort), mux))
+
+	// server := rpc.NewServer()
+	// server.Register(kn)
+	// server.HandleHTTP("/public", "/debug/public")
+	// l, e := net.Listen("tcp", util.GetHostname("", rpcPort))
+	// if e != nil {
+	// 	plog.Fatal("listen error:", e)
+	// }
+	// go http.Serve(l, nil)
 }
 
 func SpawnKeyNode(config pbft.NodeConfig, cluster *pbft.ClusterConfig, store *keystore.Keystore) *KeyNode {
@@ -114,7 +162,7 @@ func (kn *KeyNode) CreateKey(args *server.Create, reply *server.Ack) error {
 		plog.Fatal(err)
 	}
 
-	kn.consensusNode.Propose(pbft.Operation{Opcode: OP_CREATE, Op: buf.String()})
+	kn.consensusNode.Propose(pbft.Operation{Opcode: OP_CREATE, Op: buf.String(), Timestamp: time.Now()})
 
 	go kn.handleUpdates()
 	// TODO err := ks.CreateKey(args.Alias, args.Key, buf.String())
@@ -133,7 +181,7 @@ func (kn *KeyNode) UpdateKey(args *server.Update, reply *server.Ack) error {
 		plog.Fatal(err)
 	}
 
-	kn.consensusNode.Propose(pbft.Operation{Opcode: OP_UPDATE, Op: buf.String()})
+	kn.consensusNode.Propose(pbft.Operation{Opcode: OP_UPDATE, Op: buf.String(), Timestamp: time.Now()})
 
 	// TODO err := ks.UpdateKey(args.Alias, args.Update, buf.String())
 	// reply.Success = err == nil

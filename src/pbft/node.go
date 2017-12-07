@@ -87,6 +87,16 @@ func (n PBFTNode) isPrimary() bool {
 	return n.cluster.LeaderFor(n.sequenceNumber) == n.id
 }
 
+func (n PBFTNode) getPrimary() (NodeId, string) {
+	primaryId := n.cluster.LeaderFor(n.sequenceNumber)
+	for i, p := range n.peermap {
+		if i == primaryId {
+			return i, p
+		}
+	}
+	return NodeId(0), ""
+}
+
 func (n PBFTNode) isPrepared(slot Slot) bool {
 	// # Prepares received >= 2f = 2 * ((N - 1) / 3)
 	return slot.preprepare != nil && len(slot.prepares) >= 2*(len(n.peermap)/3)
@@ -140,6 +150,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 	// 3. Start RPC server
 	server := rpc.NewServer()
 	server.Register(&node)
+	node.Log(cluster.Endpoint)
 	server.HandleHTTP(cluster.Endpoint, "/debug/"+cluster.Endpoint)
 	node.Log("Listening on %v", cluster.Endpoint)
 	listener, e := net.Listen("tcp", util.GetHostname("", node.port))
@@ -189,10 +200,10 @@ func (n *PBFTNode) handleMessages() {
 func (n *PBFTNode) handleClientRequest(request *ClientRequest) {
 	// don't re-process already processed requests
 	if _, ok := n.requests[request.Id]; ok {
+		n.Log("oh no")
 		return // return with answer?
 	}
 	if n.isPrimary() {
-		n.Log("I'm the leader!")
 		if request == nil {
 			return
 		}
@@ -320,16 +331,20 @@ func (n PBFTNode) Committed() chan *Operation {
 	return n.committedChannel
 }
 
-func (n PBFTNode) Propose(operation Operation) {
-	if !n.isPrimary() {
-		// TODO: Relay request to primary!
-		return // no proposals for non-primary nodes
-	}
+func (n *PBFTNode) Propose(operation Operation) {
 	request := new(ClientRequest)
-	// TODO: put Operation type in request (does this require custome serialization stuff)
 	request.Opcode = operation.Opcode
+	request.Timestamp = operation.Timestamp
+	request.Id = operation.Timestamp.UnixNano()
 	request.Op = operation.Op
-	n.requestChannel <- request
+	if !n.isPrimary() {
+		primaryId, primaryHostname := n.getPrimary()
+		n.Log("primary id: %d", primaryId)
+		sendRpc(n.id, primaryId, primaryHostname, "PBFTNode.ClientRequest", n.cluster.Endpoint, &request, nil, 5)
+		return // no proposals for non-primary nodes
+	} else {
+		n.requestChannel <- request
+	}
 }
 
 func (n PBFTNode) GetCheckpoint() (interface{}, error) {

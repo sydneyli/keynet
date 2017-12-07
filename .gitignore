@@ -1,6 +1,5 @@
 raftexample-*/
 raftexample
-*.json
 bin
 pkg
 github.com

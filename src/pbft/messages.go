@@ -6,8 +6,9 @@ import (
 )
 
 type Operation struct {
-	Opcode int
-	Op     string
+	Opcode    int
+	Timestamp time.Time
+	Op        string
 }
 
 // REQUEST:

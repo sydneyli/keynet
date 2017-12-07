@@ -29,18 +29,24 @@ Setting up the PBFT cluster requires two configuration files to configure the
 member nodes/prime the keystore for use. The cluster members are statically
 assigned using a json file in this format:
 
+TODO: rename rpcport to something that makes sense
 ```
 {
+    "endpoint": "pbft",
     "nodes": [
         {
             "id": 1,
-            "hostname": "<host1>:<port1>",
+            "hostname": "<host1>",
+            "port": <port>,
+            "rpcport": <external port>,
             "key": "<node 1 key>",
             "primary": true
         },
         {
             "id": 2,
-            "hostname": "<host2>:<port2>",
+            "hostname": "<host2>",
+            "port": <port2>,
+            "rpcport": <external port2>,
             "key": "<node 2 key>",
             "primary": false
         },
@@ -71,11 +77,13 @@ Finally, to start up the cluster of `n` nodes acording to `cluster.json`, run
 If you enable debugging on your cluster (on by default right now), you can
 you can also run a debugging REPL with just `./distributepki -debug`. The
 REPL supports the following commands:
-  `commit`    tells the primary to commit a no-op
-  `down <id>` takes down the node with the specified id, until `up <id>` is
-              called
-  `up <id>`   brings the node with the specified id back up
-  `exit`      quits the repl
+  `commit <id>`              tells the node to commit a no-op
+  `put <id> <alias> <key>`   tells the node to commit a put operation
+  `get <id> <alias>`         tells the node to read
+  `down <id>`                takes down the node with the specified id,
+                             until `up <id>` is called
+  `up <id>`                  brings the node with the specified id back up
+  `exit`                     quits the repl
 
 ## Client usage
 
@@ -85,7 +93,10 @@ To start up the client server, go to the `client/` directory and run `./client
 Currently, to look up a key initially inserted into the table, run the
 following curl command:
 ```
-curl -L http://localhost:<cluster node HTTP port>/<desired key>
+curl -L http://localhost:<cluster node HTTP port>?name=<desired alias>
 ```
+or POST to `http://localhost:<HTTP port>?name=<desired key>` with the request
+body as the value you want to set the key.
+
 Depending on the current status of the project, that may not work.
 
