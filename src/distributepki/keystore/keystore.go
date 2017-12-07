@@ -2,6 +2,7 @@ package keystore
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/coreos/pkg/capnslog"
@@ -43,11 +44,16 @@ func (e SignatureMismatch) Error() string {
 }
 
 type Keystore struct {
-	store *Kvstore
+	keys *sync.Map
 }
 
-func NewKeystore(s *Kvstore) *Keystore {
-	return &Keystore{store: s}
+func NewKeystore(initial *map[string]string) *Keystore {
+	syncMap := sync.Map{}
+	for k, v := range *initial {
+		// TODO: figure out a better way to do this
+		syncMap.Store(k, v)
+	}
+	return &Keystore{keys: &syncMap}
 }
 
 func (ks *Keystore) CreateKey(alias Alias, key Key, clientMessage string) error {

@@ -11,7 +11,6 @@ func GetHostname(host string, port int) string {
 }
 
 func SendRpc(hostName string, endpoint string, rpcFunction string, message interface{}, response interface{}, rpcRetries int, timeout time.Duration) error {
-
 	if timeout <= 0 {
 		timeout = 100 * time.Millisecond
 	}

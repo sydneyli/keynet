@@ -15,8 +15,9 @@ var (
 type NodeId uint
 
 type ClusterConfig struct {
-	Primary PrimaryConfig
-	Nodes   []NodeConfig
+	Primary  PrimaryConfig
+	Nodes    []NodeConfig
+	Endpoint string
 }
 
 func hash(data []byte) uint {
@@ -42,6 +43,11 @@ type NodeConfig struct {
 	Host string
 	Port int
 	Key  string
+}
+
+type EndpointConfig struct {
+	Endpoint      string
+	DebugEndpoint string
 }
 
 type KeyPair struct {

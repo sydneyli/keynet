@@ -160,7 +160,7 @@ func StartRepl(cluster *pbft.ClusterConfig) {
 		}
 		err := util.SendRpc(
 			util.GetHostname(to.Host, to.Port),
-			pbft.ENDPOINT,
+			cluster.Endpoint, //TODO: listen on a different endpoint for debugging
 			"PBFTNode.Debug",
 			&message,
 			response,
@@ -181,21 +181,20 @@ func StartNode(id pbft.NodeId, initialKeyTable *map[string]string, cluster *pbft
 			thisNode = n
 		}
 	}
+
+	store := keystore.NewKeystore(initialKeyTable)
+
 	log.Infof("Starting node %d (%s)...", id, util.GetHostname(thisNode.Host, thisNode.Port))
-	ready := make(chan *pbft.PBFTNode)
-	go pbft.StartNode(thisNode, *cluster, ready)
-	node := <-ready
+	node := StartKeyNode(thisNode, cluster, store)
 	if node == nil {
 		log.Fatalf("Node %d failed to start.", id)
 		return
 	}
 	log.Infof("Node %d started successfully!", id)
-	keyNode := NewKeyNode(
-		node,
-		keystore.NewKeystore(keystore.NewKVStore(node, *initialKeyTable)),
-	)
+
 	if thisNode.Id == cluster.Primary.Id {
-		keyNode.StartRPC(cluster.Primary.RpcPort)
+		node.StartRPC(cluster.Primary.RpcPort)
 	}
-	<-node.Failure()
+
+	<-node.consensusNode.Failure()
 }

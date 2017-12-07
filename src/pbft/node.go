@@ -9,8 +9,6 @@ import (
 	"net/rpc"
 )
 
-const ENDPOINT string = "/pbft"
-
 type PBFTNode struct {
 	id         NodeId
 	host       string
@@ -103,7 +101,7 @@ func (n PBFTNode) isCommitted(slot Slot) bool {
 // NodeConfig: configuration for this node
 // ClusterConfig: configuration for entire cluster
 // ready channel: send item when node is up & running
-func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- *PBFTNode) {
+func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 	// 1. Create id <=> peer hostname maps from list
 	peermap := make(map[NodeId]string)
 	hostToPeer := make(map[string]NodeId)
@@ -141,16 +139,17 @@ func StartNode(host NodeConfig, cluster ClusterConfig, ready chan<- *PBFTNode) {
 	// 3. Start RPC server
 	server := rpc.NewServer()
 	server.Register(&node)
-	server.HandleHTTP(ENDPOINT, "/debug/pbft")
+	server.HandleHTTP(cluster.Endpoint, "/debug/"+cluster.Endpoint)
+	node.Log("Listening on %v", cluster.Endpoint)
 	listener, e := net.Listen("tcp", util.GetHostname("", node.port))
 	if e != nil {
 		node.Error("Listen error: %v", e)
-		ready <- nil
+		return nil
 	}
 	go http.Serve(listener, nil)
 	// 4. Start exec loop
 	go node.handleMessages()
-	ready <- &node
+	return &node
 }
 
 // Helper functions for logging! (prepends node id to logs)
@@ -216,10 +215,10 @@ func (n *PBFTNode) handleClientRequest(request *ClientRequest) {
 			prepared:   false,
 			committed:  false,
 		}
-		go broadcast(n.id, n.peermap, "PBFTNode.PrePrepare", &fullMessage)
+		go n.broadcast("PBFTNode.PrePrepare", &fullMessage)
 	} else {
 		// forward to all ma frandz
-		go broadcast(n.id, n.peermap, "PBFTNode.ClientRequest", request)
+		go n.broadcast("PBFTNode.ClientRequest", request)
 	}
 	n.requests[request.Id] = *request
 }
@@ -235,13 +234,14 @@ func (n *PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
 	}
 	matchingSlot := n.ensureMapping(preprepareMessage.Number)
 	if matchingSlot.preprepare != nil {
+		//TODO: Only throw here if digest is different
 		plog.Fatalf("Received more than one pre-prepare for slot id %+v", preprepareMessage.Number)
 		return
 	}
 	matchingSlot.request = &preprepare.Request
 	matchingSlot.preprepare = preprepare
 	n.log[preprepareMessage.Number] = matchingSlot
-	go broadcast(n.id, n.peermap, "PBFTNode.Prepare", &prepare)
+	go n.broadcast("PBFTNode.Prepare", &prepare)
 }
 
 func (n *PBFTNode) handlePrepare(message *Prepare) {
@@ -267,7 +267,7 @@ func (n *PBFTNode) handlePrepare(message *Prepare) {
 			Message: message.Message,
 			Node:    n.id,
 		}
-		go broadcast(n.id, n.peermap, "PBFTNode.Commit", &commit)
+		go n.broadcast("PBFTNode.Commit", &commit)
 	}
 }
 
@@ -354,17 +354,21 @@ func (n PBFTNode) Commit(req *Commit, res *Ack) error {
 	return nil
 }
 
+func (n PBFTNode) broadcast(rpcName string, message interface{}) {
+	broadcast(n.id, n.peermap, rpcName, n.cluster.Endpoint, message)
+}
+
 // ** RPC helpers ** //
-func broadcast(fromId NodeId, peers map[NodeId]string, rpcName string, message interface{}) {
+func broadcast(fromId NodeId, peers map[NodeId]string, rpcName string, endpoint string, message interface{}) {
 	for i, p := range peers {
-		err := sendRpc(fromId, i, p, rpcName, message, nil, 10)
+		err := sendRpc(fromId, i, p, rpcName, endpoint, message, nil, 10)
 		if err != nil {
 			plog.Fatal(err)
 		}
 	}
 }
 
-func sendRpc(fromId NodeId, peerId NodeId, hostName string, rpcName string, message interface{}, response interface{}, retries int) error {
+func sendRpc(fromId NodeId, peerId NodeId, hostName string, rpcName string, endpoint string, message interface{}, response interface{}, retries int) error {
 	plog.Infof("[Node %d] Sending RPC (%s) to Node %d", fromId, rpcName, peerId)
-	return util.SendRpc(hostName, ENDPOINT, rpcName, message, response, retries, 0)
+	return util.SendRpc(hostName, endpoint, rpcName, message, response, retries, 0)
 }

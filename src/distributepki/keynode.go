@@ -54,6 +54,21 @@ func (kn *KeyNode) StartRPC(rpcPort int) {
 	go http.Serve(l, nil)
 }
 
+func StartKeyNode(config pbft.NodeConfig, cluster *pbft.ClusterConfig, store *keystore.Keystore) *KeyNode {
+	node := pbft.StartNode(config, *cluster)
+	if node == nil {
+		return nil
+	}
+
+	keyNode := KeyNode{
+		consensusNode: node,
+		store:         store,
+	}
+	go keyNode.serveKeyRequests()
+
+	return &keyNode
+}
+
 func (kn *KeyNode) CreateKey(args *server.Create, reply *server.Ack) error {
 
 	log.Info("Create Key: %+v", args)
