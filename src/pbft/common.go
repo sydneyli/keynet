@@ -68,3 +68,10 @@ func (slot SlotId) Before(other SlotId) bool {
 	}
 	return slot.ViewNumber < other.ViewNumber
 }
+
+func (slot SlotId) BeforeOrEqual(other SlotId) bool {
+	if slot.ViewNumber == other.ViewNumber {
+		return slot.SeqNumber <= other.SeqNumber
+	}
+	return slot.ViewNumber <= other.ViewNumber
+}
