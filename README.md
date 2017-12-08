@@ -77,13 +77,13 @@ Finally, to start up the cluster of `n` nodes acording to `cluster.json`, run
 If you enable debugging on your cluster (on by default right now), you can
 you can also run a debugging REPL with just `./distributepki -debug`. The
 REPL supports the following commands:
-  `commit <id>`              tells the node to commit a no-op
-  `put <id> <alias> <key>`   tells the node to commit a put operation
-  `get <id> <alias>`         tells the node to read
-  `down <id>`                takes down the node with the specified id,
+  * `commit <id>`              tells the node to commit a no-op
+  * `put <id> <alias> <key>`   tells the node to commit a put operation
+  * `get <id> <alias>`         tells the node to read
+  * `down <id>`                takes down the node with the specified id,
                              until `up <id>` is called
-  `up <id>`                  brings the node with the specified id back up
-  `exit`                     quits the repl
+  * `up <id>`                  brings the node with the specified id back up
+  * `exit`                     quits the repl
 
 ## Client usage
 
