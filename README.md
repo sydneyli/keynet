@@ -101,11 +101,17 @@ body as the value you want to set the key.
 Depending on the current status of the project, that may not work.
 
 ## TODO:
- - Actually sign and verify reads
- - Catch up nodes properly (do the fancy stuff on new views, like in paper)
- - Reuse RPC connections
- - Checkpointing
-    - limit sequence nums properly (to a range)
-    - go through and make sure sequence numbers are being advanced correctly
- - Check for resource leaks
+*bold* means we're working on it
+### core functionality
+ - [ ] *Actually sign and verify reads* (JL)
+ - [ ] *Catch up nodes properly (fancy stuff on new views, like in paper)* (syd)
+ - [X] View changes on client request timeout & on heartbeat timeout
+ - [ ] Checkpointing
+    * limit sequence nums properly (to a range)
+    * go through and make sure sequence numbers are being advanced correctly
+
+### not core, but also important
+ - [ ] Check for resource leaks
+ - [ ] tests?? l0l
+ - [ ] Reuse RPC connections
 
