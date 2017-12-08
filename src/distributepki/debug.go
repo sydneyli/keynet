@@ -18,7 +18,7 @@ import (
 func sendDebugMessage(cluster *pbft.ClusterConfig, node *pbft.NodeConfig, msg pbft.DebugMessage) {
 	err := util.SendRpc(
 		util.GetHostname(node.Host, node.Port),
-		cluster.Endpoint, //TODO: listen on a different endpoint for debugging
+		cluster.Endpoint, // TODO: listen on a different endpoint for debugging
 		"PBFTNode.Debug",
 		&msg,
 		nil,
@@ -165,7 +165,7 @@ func StartDebugRepl(cluster *pbft.ClusterConfig) {
 		case "up":
 			sendPbft(cluster, cmdList[1:], pbft.DebugMessage{Op: pbft.UP})
 		case "down":
-			sendPbft(cluster, cmdList[1:], pbft.DebugMessage{Op: pbft.UP})
+			sendPbft(cluster, cmdList[1:], pbft.DebugMessage{Op: pbft.DOWN})
 		}
 	}
 }

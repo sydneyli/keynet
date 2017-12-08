@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/rpc"
+	"time"
 )
 
 type PBFTNode struct {
@@ -25,6 +26,9 @@ type PBFTNode struct {
 	preprepareChannel chan *PrePrepareFull
 	prepareChannel    chan *Prepare
 	commitChannel     chan *Commit
+	viewChangeChannel chan *ViewChange
+	newViewChannel    chan *NewView
+	timeoutChannel    chan bool
 
 	// client library channels
 	errorChannel     chan error
@@ -33,12 +37,16 @@ type PBFTNode struct {
 	// local
 	KeyRequest chan *KeyRequest // hostname
 
-	// TODO: handle client request timeouts with the below
-	requests            map[int64]ClientRequest
+	requests            map[int64]requestInfo
 	log                 map[SlotId]Slot
 	viewNumber          int
 	sequenceNumber      int
 	mostRecentCommitted SlotId // most recently committed view/sequence num
+	viewChange          *viewChangeInfo
+}
+
+type viewChangeInfo struct {
+	inProgress bool
 }
 
 type KeyRequest struct {
@@ -141,11 +149,15 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		preprepareChannel:   make(chan *PrePrepareFull),
 		prepareChannel:      make(chan *Prepare),
 		commitChannel:       make(chan *Commit),
-		requests:            make(map[int64]ClientRequest),
+		viewChangeChannel:   make(chan *ViewChange),
+		newViewChannel:      make(chan *NewView),
+		timeoutChannel:      make(chan bool),
+		requests:            make(map[int64]requestInfo),
 		log:                 make(map[SlotId]Slot),
 		viewNumber:          0,
 		sequenceNumber:      0,
 		mostRecentCommitted: initSlotId,
+		viewChange:          &viewChangeInfo{inProgress: false},
 	}
 	// 3. Start RPC server
 	server := rpc.NewServer()
@@ -180,6 +192,7 @@ func (n PBFTNode) Error(format string, args ...interface{}) {
 
 func (n *PBFTNode) handleMessages() {
 	for {
+		n.Log("wiating for another request")
 		select {
 		case msg := <-n.debugChannel:
 			n.handleDebug(msg)
@@ -191,6 +204,12 @@ func (n *PBFTNode) handleMessages() {
 			n.handlePrepare(msg)
 		case msg := <-n.commitChannel:
 			n.handleCommit(msg)
+		case <-n.timeoutChannel:
+			n.startViewChange()
+		case msg := <-n.viewChangeChannel:
+			n.handleViewChange(msg)
+		case msg := <-n.newViewChannel:
+			n.handleNewView(msg)
 		}
 	}
 }
@@ -198,9 +217,12 @@ func (n *PBFTNode) handleMessages() {
 // does appropriate actions after receivin a client request
 // i.e. send out preprepares and stuff
 func (n *PBFTNode) handleClientRequest(request *ClientRequest) {
+	if n.viewChange.inProgress {
+		return
+	}
+	n.Log("Start handling client request")
 	// don't re-process already processed requests
 	if _, ok := n.requests[request.Id]; ok {
-		n.Log("oh no")
 		return // return with answer?
 	}
 	if n.isPrimary() {
@@ -230,14 +252,35 @@ func (n *PBFTNode) handleClientRequest(request *ClientRequest) {
 		go n.broadcast("PBFTNode.PrePrepare", &fullMessage)
 	} else {
 		// forward to all ma frandz
-		go n.broadcast("PBFTNode.ClientRequest", request)
+		// go n.broadcast("PBFTNode.ClientRequest", request)
+		primaryId, primaryHostname := n.getPrimary()
+		n.Log("primary id: %d", primaryId)
+		go sendRpc(n.id, primaryId, primaryHostname, "PBFTNode.ClientRequest", n.cluster.Endpoint, request, nil, 5)
 	}
-	n.requests[request.Id] = *request
+	n.requests[request.Id] = requestInfo{
+		id:        request.Id,
+		committed: false,
+		request:   request,
+	}
+	// start execution timer...
+	go func(n *PBFTNode) {
+		n.Log("STARTING timer for request %+v", request)
+		<-time.After(5 * time.Second)
+		n.Log("FINISHED timer for request %+v", n.requests[request.Id])
+		if !n.requests[request.Id].committed {
+			n.Log("not")
+			n.timeoutChannel <- true
+		}
+	}(n)
+	n.Log("done handling request")
 }
 
 // TODO: verification should include:
 //     1. only the leader of the specified view can send preprepares
 func (n *PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
+	if n.viewChange.inProgress {
+		return
+	}
 	preprepareMessage := preprepare.PrePrepareMessage
 	prepare := Prepare{
 		Number:  preprepareMessage.Number,
@@ -257,6 +300,9 @@ func (n *PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
 }
 
 func (n *PBFTNode) handlePrepare(message *Prepare) {
+	if n.viewChange.inProgress {
+		return
+	}
 	// TODO: validate prepare message
 	/*
 		// TODO: come back and fix this
@@ -283,7 +329,18 @@ func (n *PBFTNode) handlePrepare(message *Prepare) {
 	}
 }
 
+func (n *PBFTNode) handleViewChange(message *ViewChange) {
+	// TODO (sydli): implement
+}
+
+func (n *PBFTNode) handleNewView(message *NewView) {
+	// TODO (sydli): implement
+}
+
 func (n *PBFTNode) handleCommit(message *Commit) {
+	if n.viewChange.inProgress {
+		return
+	}
 	// TODO: validate commit message
 	/*
 		// TODO: come back and fix validation
@@ -296,6 +353,12 @@ func (n *PBFTNode) handleCommit(message *Commit) {
 	nowCommitted := !slot.committed && n.isCommitted(slot)
 	if nowCommitted {
 		slot.committed = true
+		info := n.requests[message.Message.Id] //.committed = true
+		n.requests[message.Message.Id] = requestInfo{
+			id:        info.id,
+			committed: true,
+			request:   info.request,
+		}
 	}
 	n.log[message.Number] = slot
 	if nowCommitted {
@@ -317,8 +380,17 @@ func (n *PBFTNode) handleCommit(message *Commit) {
 //     then start timer T. If primary does not broadcast NEW-VIEW by then, do a new VIEW-CHANGE
 //	   but this time set timer to 2T
 //   when primary for view + 1 gets 2F VIEW-CHANGE messages, multicast NEW-VIEW
+// if a replica gets f+1 view change messages for a higher view, then send view-change
+// with smallest view of the message set
 
 func (n *PBFTNode) startViewChange() {
+	n.Log("START VIEW CHANGE =================")
+	n.viewChange.inProgress = true
+	message := ViewChange{
+		ViewNumber: n.mostRecentCommitted.ViewNumber,
+		Node:       n.id,
+	}
+	go n.broadcast("PBFTNode.ViewChange", &message)
 }
 
 // ** Protocol **//
@@ -337,14 +409,7 @@ func (n *PBFTNode) Propose(operation Operation) {
 	request.Timestamp = operation.Timestamp
 	request.Id = operation.Timestamp.UnixNano()
 	request.Op = operation.Op
-	if !n.isPrimary() {
-		primaryId, primaryHostname := n.getPrimary()
-		n.Log("primary id: %d", primaryId)
-		sendRpc(n.id, primaryId, primaryHostname, "PBFTNode.ClientRequest", n.cluster.Endpoint, &request, nil, 5)
-		return // no proposals for non-primary nodes
-	} else {
-		n.requestChannel <- request
-	}
+	n.requestChannel <- request
 }
 
 func (n PBFTNode) GetCheckpoint() (interface{}, error) {
@@ -369,6 +434,16 @@ func (n PBFTNode) Prepare(req *Prepare, res *Ack) error {
 
 func (n PBFTNode) Commit(req *Commit, res *Ack) error {
 	n.commitChannel <- req
+	return nil
+}
+
+func (n PBFTNode) ViewChange(req *ViewChange, res *Ack) error {
+	n.viewChangeChannel <- req
+	return nil
+}
+
+func (n PBFTNode) NewView(req *NewView, res *Ack) error {
+	n.newViewChannel <- req
 	return nil
 }
 

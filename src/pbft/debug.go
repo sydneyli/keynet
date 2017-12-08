@@ -18,6 +18,7 @@ func (n *PBFTNode) Debug(req *DebugMessage, res *Ack) error {
 	return nil
 }
 
+// TODO (sydli): instead of blocking, should just drop all messages
 func (n *PBFTNode) blockUntilUp() {
 	for {
 		msg := <-n.debugChannel
@@ -30,6 +31,7 @@ func (n *PBFTNode) blockUntilUp() {
 
 func (n *PBFTNode) handleDebug(debug *DebugMessage) {
 	switch op := debug.Op; op {
+	// TODO (sydli): remove PUT operation (since we can use client http api)
 	case PUT:
 		n.Log("PUT %+v", debug.Request)
 		n.handleClientRequest(&debug.Request)
