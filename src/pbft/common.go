@@ -3,9 +3,8 @@ package pbft
 import (
 	"github.com/coreos/pkg/capnslog"
 
-	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
-	"hash/fnv"
 )
 
 var (
@@ -19,17 +18,16 @@ type ClusterConfig struct {
 	Endpoint string
 }
 
-func hash(data []byte) uint {
-	h := fnv.New32a()
-	h.Write(data)
-	return uint(h.Sum32())
+func hash(data []byte) uint32 {
+	h := sha256.Sum256(data)
+	return binary.LittleEndian.Uint32(h[:])
 }
 
 // Deterministic leader calculation
 func (c ClusterConfig) LeaderFor(viewNumber int) NodeId {
-	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.LittleEndian, viewNumber)
-	return c.Nodes[hash(buf.Bytes())%uint(len(c.Nodes))].Id
+	buf := make([]byte, 4)
+	binary.LittleEndian.PutUint32(buf, uint32(viewNumber))
+	return c.Nodes[hash(buf)%uint32(len(c.Nodes))].Id
 }
 
 type NodeConfig struct {

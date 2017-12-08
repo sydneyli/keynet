@@ -126,7 +126,7 @@ func SpawnKeyNode(config pbft.NodeConfig, cluster *pbft.ClusterConfig, store *ke
 
 	go keyNode.handleUpdates()
 	go keyNode.serveKeyRequests()
-	go keyNode.testPropose()
+	// go keyNode.testPropose()
 	return &keyNode
 }
 
@@ -164,7 +164,7 @@ func (kn *KeyNode) CreateKey(args *server.Create, reply *server.Ack) error {
 
 	kn.consensusNode.Propose(pbft.Operation{Opcode: OP_CREATE, Op: buf.String(), Timestamp: time.Now()})
 
-	go kn.handleUpdates()
+	// go kn.handleUpdates()
 	// TODO err := ks.CreateKey(args.Alias, args.Key, buf.String())
 	// reply.Success = err == nil
 	// return err

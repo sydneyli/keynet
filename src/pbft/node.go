@@ -37,16 +37,18 @@ type PBFTNode struct {
 	// local
 	KeyRequest chan *KeyRequest // hostname
 
-	requests            map[int64]requestInfo
-	log                 map[SlotId]Slot
-	viewNumber          int
-	sequenceNumber      int
-	mostRecentCommitted SlotId // most recently committed view/sequence num
-	viewChange          *viewChangeInfo
+	requests       map[int64]requestInfo
+	log            map[SlotId]Slot
+	viewNumber     int
+	sequenceNumber int
+	viewChange     *viewChangeInfo
+	// view num => viewchange
+	viewChangeMessages map[NodeId]*ViewChange
 }
 
 type viewChangeInfo struct {
 	inProgress bool
+	viewNumber int
 }
 
 type KeyRequest struct {
@@ -92,11 +94,11 @@ func (n PBFTNode) keyFor(hostname string) (*string, error) {
 }
 
 func (n PBFTNode) isPrimary() bool {
-	return n.cluster.LeaderFor(n.sequenceNumber) == n.id
+	return n.cluster.LeaderFor(n.viewNumber) == n.id
 }
 
 func (n PBFTNode) getPrimary() (NodeId, string) {
-	primaryId := n.cluster.LeaderFor(n.sequenceNumber)
+	primaryId := n.cluster.LeaderFor(n.viewNumber)
 	for i, p := range n.peermap {
 		if i == primaryId {
 			return i, p
@@ -130,34 +132,30 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 			hostToPeer[hostname] = p.Id
 		}
 	}
-	initSlotId := SlotId{
-		ViewNumber: 0,
-		SeqNumber:  0,
-	}
 	// 2. Create the node
 	node := PBFTNode{
-		id:                  host.Id,
-		host:                host.Host,
-		port:                host.Port,
-		peermap:             peermap,
-		hostToPeer:          hostToPeer,
-		cluster:             cluster,
-		debugChannel:        make(chan *DebugMessage),
-		committedChannel:    make(chan *Operation),
-		errorChannel:        make(chan error),
-		requestChannel:      make(chan *ClientRequest, 10), // some nice inherent rate limiting
-		preprepareChannel:   make(chan *PrePrepareFull),
-		prepareChannel:      make(chan *Prepare),
-		commitChannel:       make(chan *Commit),
-		viewChangeChannel:   make(chan *ViewChange),
-		newViewChannel:      make(chan *NewView),
-		timeoutChannel:      make(chan bool),
-		requests:            make(map[int64]requestInfo),
-		log:                 make(map[SlotId]Slot),
-		viewNumber:          0,
-		sequenceNumber:      0,
-		mostRecentCommitted: initSlotId,
-		viewChange:          &viewChangeInfo{inProgress: false},
+		id:                 host.Id,
+		host:               host.Host,
+		port:               host.Port,
+		peermap:            peermap,
+		hostToPeer:         hostToPeer,
+		cluster:            cluster,
+		debugChannel:       make(chan *DebugMessage),
+		committedChannel:   make(chan *Operation),
+		errorChannel:       make(chan error),
+		requestChannel:     make(chan *ClientRequest, 10), // some nice inherent rate limiting
+		preprepareChannel:  make(chan *PrePrepareFull),
+		prepareChannel:     make(chan *Prepare),
+		commitChannel:      make(chan *Commit),
+		viewChangeChannel:  make(chan *ViewChange),
+		newViewChannel:     make(chan *NewView),
+		timeoutChannel:     make(chan bool),
+		requests:           make(map[int64]requestInfo),
+		log:                make(map[SlotId]Slot),
+		viewNumber:         0,
+		sequenceNumber:     0,
+		viewChange:         &viewChangeInfo{inProgress: false, viewNumber: 0},
+		viewChangeMessages: make(map[NodeId]*ViewChange),
 	}
 	// 3. Start RPC server
 	server := rpc.NewServer()
@@ -192,7 +190,6 @@ func (n PBFTNode) Error(format string, args ...interface{}) {
 
 func (n *PBFTNode) handleMessages() {
 	for {
-		n.Log("wiating for another request")
 		select {
 		case msg := <-n.debugChannel:
 			n.handleDebug(msg)
@@ -204,8 +201,8 @@ func (n *PBFTNode) handleMessages() {
 			n.handlePrepare(msg)
 		case msg := <-n.commitChannel:
 			n.handleCommit(msg)
-		case <-n.timeoutChannel:
-			n.startViewChange()
+		case <-n.timeoutChannel: // one of my client requests timed out!
+			n.startViewChange(n.viewNumber + 1)
 		case msg := <-n.viewChangeChannel:
 			n.handleViewChange(msg)
 		case msg := <-n.newViewChannel:
@@ -220,7 +217,6 @@ func (n *PBFTNode) handleClientRequest(request *ClientRequest) {
 	if n.viewChange.inProgress {
 		return
 	}
-	n.Log("Start handling client request")
 	// don't re-process already processed requests
 	if _, ok := n.requests[request.Id]; ok {
 		return // return with answer?
@@ -251,11 +247,11 @@ func (n *PBFTNode) handleClientRequest(request *ClientRequest) {
 		}
 		go n.broadcast("PBFTNode.PrePrepare", &fullMessage)
 	} else {
-		// forward to all ma frandz
-		// go n.broadcast("PBFTNode.ClientRequest", request)
-		primaryId, primaryHostname := n.getPrimary()
-		n.Log("primary id: %d", primaryId)
-		go sendRpc(n.id, primaryId, primaryHostname, "PBFTNode.ClientRequest", n.cluster.Endpoint, request, nil, 5)
+		// forward to all ma frandz if im not da leader
+		go n.broadcast("PBFTNode.ClientRequest", request)
+		// primaryId, primaryHostname := n.getPrimary()
+		// n.Log("primary id: %d", primaryId)
+		// go sendRpc(n.id, primaryId, primaryHostname, "PBFTNode.ClientRequest", n.cluster.Endpoint, request, nil, 5)
 	}
 	n.requests[request.Id] = requestInfo{
 		id:        request.Id,
@@ -264,15 +260,11 @@ func (n *PBFTNode) handleClientRequest(request *ClientRequest) {
 	}
 	// start execution timer...
 	go func(n *PBFTNode) {
-		n.Log("STARTING timer for request %+v", request)
-		<-time.After(5 * time.Second)
-		n.Log("FINISHED timer for request %+v", n.requests[request.Id])
+		<-time.After(2 * time.Second)
 		if !n.requests[request.Id].committed {
-			n.Log("not")
 			n.timeoutChannel <- true
 		}
 	}(n)
-	n.Log("done handling request")
 }
 
 // TODO: verification should include:
@@ -330,11 +322,87 @@ func (n *PBFTNode) handlePrepare(message *Prepare) {
 }
 
 func (n *PBFTNode) handleViewChange(message *ViewChange) {
-	// TODO (sydli): implement
+	// Paper: section 4.5.2
+	// if a replica receives a set of f+1 valid view change messages
+	// from other replicas for views higher than its current view,
+	// it sends a view-change message for the next smallest view in
+	// the set, even if its timer has not expired.
+	var currentView int
+	if n.viewChange.inProgress {
+		currentView = n.viewChange.viewNumber
+	} else {
+		currentView = n.viewNumber
+	}
+	// 0. Update most recently seen viewchange message from this node
+	n.viewChangeMessages[message.Node] = message
+	// 1. If a replica receives a set of f+1 valid view change messages
+	// from other replicas for views higher than its current view...
+	if message.ViewNumber > currentView {
+		higherThanCurrent := 0
+		lowestNewView := message.ViewNumber
+		for _, msg := range n.viewChangeMessages {
+			if msg.ViewNumber > currentView {
+				higherThanCurrent += 1
+				if msg.ViewNumber < lowestNewView {
+					lowestNewView = msg.ViewNumber
+				}
+			}
+		}
+		if higherThanCurrent >= (len(n.peermap)/3)+1 {
+			// 2. Broadcast view-change messages for the next smallest
+			//    view in that set.
+			n.startViewChange(lowestNewView)
+			return
+		}
+	}
+	// Paper: 4.4
+	// When the primary p of view v + 1 receives 2f valid view-change messages
+	// for view v + 1, it multicasts NEW-VIEW.
+	// < And then it does a bunch of stuff I haven't read through yet >
+	// Then it /enters/ view v+1: at this point it is able to accept messages for
+	// view v + 1.
+	// 0. If no new view change was started, and I'm the leader of this view change
+	if n.viewChange.inProgress && n.cluster.LeaderFor(message.ViewNumber) == n.id {
+		n.Log("I'm the leader for view %d", message.ViewNumber)
+		// 1. See if we got 2f view-change messages for this view!
+		votes := 0
+		for _, msg := range n.viewChangeMessages {
+			if msg.ViewNumber == message.ViewNumber {
+				votes += 1
+			}
+		}
+		// 2. If so, multicast new-view
+		if votes >= (2 * len(n.peermap) / 3) {
+			newview := NewView{
+				ViewNumber: message.ViewNumber,
+				Node:       n.id,
+			}
+			go n.broadcast("PBFTNode.NewView", &newview)
+			n.enterNewView(message.ViewNumber)
+		}
+	}
 }
 
 func (n *PBFTNode) handleNewView(message *NewView) {
-	// TODO (sydli): implement
+	// Paper: section 4.4
+	// A backup accepts a new-view message for view v+1 if it is signed
+	// properly, if the view-change messages it contains are valid for view v+1,
+	// and *if the set O is correct* (TODO). It multicasts prepares for each
+	// message in O, and enters view + 1
+	var currentView int
+	if n.viewChange.inProgress {
+		if message.ViewNumber == n.viewChange.viewNumber {
+			n.enterNewView(message.ViewNumber)
+			return
+		}
+		currentView = n.viewChange.viewNumber
+	} else {
+		currentView = n.viewNumber
+	}
+	// TODO: validate everything
+	if message.ViewNumber > currentView {
+		n.enterNewView(message.ViewNumber)
+	}
 }
 
 func (n *PBFTNode) handleCommit(message *Commit) {
@@ -380,17 +448,28 @@ func (n *PBFTNode) handleCommit(message *Commit) {
 //     then start timer T. If primary does not broadcast NEW-VIEW by then, do a new VIEW-CHANGE
 //	   but this time set timer to 2T
 //   when primary for view + 1 gets 2F VIEW-CHANGE messages, multicast NEW-VIEW
-// if a replica gets f+1 view change messages for a higher view, then send view-change
-// with smallest view of the message set
+// (done) if a replica gets f+1 view change messages for a higher view, then send view-change
+//         with smallest view of the message set
 
-func (n *PBFTNode) startViewChange() {
-	n.Log("START VIEW CHANGE =================")
+func (n *PBFTNode) startViewChange(view int) {
+	if n.viewChange.inProgress && n.viewChange.viewNumber >= view {
+		return
+	}
+	n.Log("START VIEW CHANGE FOR VIEW %d", view)
 	n.viewChange.inProgress = true
+	n.viewChange.viewNumber = view
 	message := ViewChange{
-		ViewNumber: n.mostRecentCommitted.ViewNumber,
+		ViewNumber: view,
 		Node:       n.id,
 	}
 	go n.broadcast("PBFTNode.ViewChange", &message)
+}
+
+func (n *PBFTNode) enterNewView(view int) {
+	n.Log("ENTER NEW VIEW FOR VIEW %d", view)
+	n.viewChange.inProgress = false
+	n.viewNumber = view
+	n.sequenceNumber = 0
 }
 
 // ** Protocol **//
