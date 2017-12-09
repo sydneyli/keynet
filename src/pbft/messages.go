@@ -68,16 +68,39 @@ type Commit struct {
 	Node    NodeId
 }
 
+// The checkpoint protocol is used to advance the low and high
+// watermarks. Low watermark = sequence num of last checkpoint.
+// High watermark = Low watermark + (checkpoint delta) * 2
+
+// CHECKPOINT:
+// seqnum, digest of state, node addr
+// 2f + 1 of these is a proof for a particular seqnum's
+// checkpoint
+// (signed by node i)
+type Checkpoint struct {
+	Number SlotId
+	Node   NodeId
+}
+
+type PreparedProof struct {
+	Number     SlotId
+	Preprepare PrePrepareFull
+	Prepares   map[NodeId]Prepare
+}
+
 // TODO: include all proofs/verification stuff
 // VIEW CHANGE:
-// viewnum, seqnum, client message (digest), node addr
+// n: last checkpoint sequence num
+// C: Proof of checkpoint at n
+// P: Proof of all PREPARED requests after n
+//    1 Preprepare message (signed) and 2f+1 prepares per
 // (signed by node i)
 type ViewChange struct {
-	ViewNumber int
-	// n: last checkpoint sequence num
-	// C: Proof of checkpoint at n
-	// P: Proof of all requests after n
-	Node NodeId
+	ViewNumber      int                      // v + 1
+	Checkpoint      SlotId                   // n
+	CheckpointProof map[NodeId]Checkpoint    // C
+	Proofs          map[SlotId]PreparedProof // P
+	Node            NodeId                   // i
 }
 
 func (v ViewChange) verify() bool {
@@ -86,14 +109,18 @@ func (v ViewChange) verify() bool {
 
 // NEW VIEW
 // viewnum, seqnum, client message (digest), node addr
+// V: set of 2f valid view-change messages
+// O: a set of pre-prepare messages
 // (signed by node i)
 type NewView struct {
-	ViewNumber int
-	// V: set of valid view-change messages
-	// O: a set of pre-prepare messages
-	// TODO (sydli): I have no idea what O is
-	Node NodeId
+	ViewNumber  int                       // v + 1
+	ViewChanges map[NodeId]ViewChange     // V
+	PrePrepares map[SlotId]PrePrepareFull // O
+	Node        NodeId                    // i
 }
+
+// Backup verifies O, multicasts prepares for every message
+// in O, then enters new view.
 
 func (v NewView) verify() bool {
 	return true

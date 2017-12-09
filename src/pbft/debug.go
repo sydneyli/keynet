@@ -37,7 +37,9 @@ func (n *PBFTNode) handleDebug(debug *DebugMessage) {
 		n.handleClientRequest(&debug.Request)
 	case DOWN:
 		n.Log("DOWN")
-		n.blockUntilUp()
+		n.down = true
 	case UP:
+		n.Log("UP")
+		n.down = false
 	}
 }

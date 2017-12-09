@@ -77,7 +77,6 @@ Finally, to start up the cluster of `n` nodes acording to `cluster.json`, run
 If you enable debugging on your cluster (on by default right now), you can
 you can also run a debugging REPL with just `./distributepki -debug`. The
 REPL supports the following commands:
-  * `commit <id>`              tells the node to commit a no-op
   * `put <id> <alias> <key>`   tells the node to commit a put operation
   * `get <id> <alias>`         tells the node to read
   * `down <id>`                takes down the node with the specified id,
@@ -101,7 +100,7 @@ body as the value you want to set the key.
 Depending on the current status of the project, that may not work.
 
 ## TODO:
-*bold* means we're working on it
+*this* means we're working on it
 ### core functionality
  - [ ] *Actually sign and verify reads* (JL)
  - [ ] *Catch up nodes properly (fancy stuff on new views, like in paper)* (syd)

@@ -56,7 +56,7 @@ type SlotId struct {
 type Slot struct {
 	request    *ClientRequest
 	preprepare *PrePrepareFull
-	prepares   map[NodeId]*Prepare
+	prepares   map[NodeId]Prepare
 	commits    map[NodeId]*Commit
 	prepared   bool
 	committed  bool

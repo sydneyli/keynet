@@ -12,7 +12,6 @@ import (
 	"pbft"
 	"strconv"
 	"strings"
-	"time"
 )
 
 func sendDebugMessage(cluster *pbft.ClusterConfig, node *pbft.NodeConfig, msg pbft.DebugMessage) {
@@ -152,16 +151,6 @@ func StartDebugRepl(cluster *pbft.ClusterConfig) {
 			extractGetParams(cluster, cmdList[1:], doGet)
 		case "put":
 			extractPutParams(cluster, cmdList[1:], doPut)
-		case "commit":
-			sendPbft(cluster, cmdList[1:], pbft.DebugMessage{
-				Op: pbft.PUT,
-				Request: pbft.ClientRequest{
-					Opcode:    OP_CREATE,
-					Op:        "bingo",
-					Id:        time.Now().UnixNano(),
-					Timestamp: time.Now(),
-					Client:    nil,
-				}})
 		case "up":
 			sendPbft(cluster, cmdList[1:], pbft.DebugMessage{Op: pbft.UP})
 		case "down":

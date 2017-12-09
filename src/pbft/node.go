@@ -61,6 +61,10 @@ type PBFTNode struct {
 	// if viewChange.inProgress.
 	viewChange *viewChangeInfo
 
+	// CHECKPOINT STATE.
+	lastCheckpoint  SlotId
+	checkpointProof map[NodeId]Checkpoint
+
 	// TIMEOUTS. The heartbeat ticker allows the primary to
 	// continually send timeouts; replicas use the timeout
 	// timer to determine if the leader has been active.
@@ -82,7 +86,7 @@ type PBFTNode struct {
 
 // Information associated with current view change.
 type viewChangeInfo struct {
-	messages   map[NodeId]*ViewChange
+	messages   map[NodeId]ViewChange
 	inProgress bool
 	viewNumber int
 }
@@ -92,7 +96,11 @@ type KeyRequest struct {
 	Reply    chan *string
 }
 
-const TIMEOUT time.Duration = time.Duration(5 * time.Second)
+// Heartbeat ticker
+const TIMEOUT time.Duration = time.Duration(time.Second)
+
+// How many sequence numbers to wait before checkpointing
+const CHECKPOINT uint = 100
 
 // Entry point for each PBFT node.
 // NodeConfig: configuration for this node
@@ -132,7 +140,9 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		viewNumber:            0,
 		sequenceNumber:        0,
 		issuedSequenceNumber:  0,
-		viewChange:            &viewChangeInfo{inProgress: false, viewNumber: 0, messages: make(map[NodeId]*ViewChange)},
+		viewChange:            &viewChangeInfo{inProgress: false, viewNumber: 0, messages: make(map[NodeId]ViewChange)},
+		lastCheckpoint:        SlotId{ViewNumber: 0, SeqNumber: 0},
+		checkpointProof:       make(map[NodeId]Checkpoint),
 		heartbeatTicker:       nil,
 		timeoutTimer:          nil,
 		caughtUp:              make(map[NodeId]bool),
@@ -185,17 +195,11 @@ func (n *PBFTNode) ensureMapping(num SlotId) Slot {
 		slot = Slot{
 			request:    nil,
 			preprepare: nil,
-			prepares:   make(map[NodeId]*Prepare),
+			prepares:   make(map[NodeId]Prepare),
 			commits:    make(map[NodeId]*Commit),
 			prepared:   false,
 			committed:  false,
 		}
-		/*
-			// TODO: necessary?
-			if n.mostRecent.Before(num) {
-				n.mostRecent = num
-			}
-		*/
 		n.log[num] = slot
 	}
 	return slot
@@ -278,14 +282,20 @@ func (n *PBFTNode) handleClientRequest(request *ClientRequest) {
 	if _, ok := n.requests[request.Id]; ok {
 		return // return with answer?
 	}
+	n.requests[request.Id] = requestInfo{
+		id:        request.Id,
+		committed: false,
+		request:   request,
+	}
 	if n.isPrimary() {
 		if request == nil {
 			return
 		}
 		n.issuedSequenceNumber = n.issuedSequenceNumber + 1
+		n.Log("ISSUED SEQNUM %d for %d", n.issuedSequenceNumber, request.Id)
 		id := SlotId{
 			ViewNumber: n.viewNumber,
-			SeqNumber:  n.issuedSequenceNumber + 1,
+			SeqNumber:  n.issuedSequenceNumber,
 		}
 		fullMessage := PrePrepareFull{
 			PrePrepareMessage: PrePrepare{
@@ -296,7 +306,7 @@ func (n *PBFTNode) handleClientRequest(request *ClientRequest) {
 		n.log[id] = Slot{
 			request:    request,
 			preprepare: &fullMessage,
-			prepares:   make(map[NodeId]*Prepare),
+			prepares:   make(map[NodeId]Prepare),
 			commits:    make(map[NodeId]*Commit),
 			prepared:   false,
 			committed:  false,
@@ -304,12 +314,9 @@ func (n *PBFTNode) handleClientRequest(request *ClientRequest) {
 		go n.broadcast("PBFTNode.PrePrepare", &fullMessage, 0)
 	} else {
 		// forward to all ma frandz if im not da leader
+		// TODO: they should probably just forward it to the leader
 		go n.broadcast("PBFTNode.ClientRequest", request, 0)
-		n.requests[request.Id] = requestInfo{
-			id:        request.Id,
-			committed: false,
-			request:   request,
-		}
+
 		// start execution timer...
 		go func(n *PBFTNode) {
 			<-time.After(TIMEOUT)
@@ -327,6 +334,14 @@ func (n *PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
 	if n.viewChange.inProgress {
 		return
 	}
+	// A backup accepts a pre-prepare message provided:
+	// -  the signatures in the request and the pre-prepare message are
+	//    correct and d is the digest for message m
+	// -  it is in view v
+	// -  it has not accepted a pre-prepare message for view v and seq
+	//    num n containing a different digest
+	// -  the sequence number in the preprepare message is between the
+	//    low water-mark h and high water-mark H
 	// TODO: Drop invalid Preprepares...
 	// verification should include:
 	//     1. only the leader of the specified view can send preprepares
@@ -335,6 +350,10 @@ func (n *PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
 	if preprepareMessage == (PrePrepare{}) {
 		//NO-OP heartbeat... don't bother processing
 		return
+	}
+	newSeqNum := preprepare.PrePrepareMessage.Number.SeqNumber
+	if newSeqNum > n.issuedSequenceNumber {
+		n.issuedSequenceNumber = newSeqNum
 	}
 	prepare := Prepare{
 		Number:  preprepareMessage.Number,
@@ -360,7 +379,6 @@ func (n *PBFTNode) handlePrepare(message *Prepare) {
 	if n.down {
 		return
 	}
-	n.Log("PREPARE")
 	// If we've already committed this message... don't bother
 	if message.Number.BeforeOrEqual(SlotId{
 		ViewNumber: n.viewNumber, SeqNumber: n.sequenceNumber}) {
@@ -369,7 +387,7 @@ func (n *PBFTNode) handlePrepare(message *Prepare) {
 	// TODO: validate prepare message
 	slot := n.ensureMapping(message.Number)
 	//TODO: check that the prepare matches the pre-prepare message if it exists
-	slot.prepares[message.Node] = message
+	slot.prepares[message.Node] = *message
 	nowPrepared := !slot.prepared && n.isPrepared(slot)
 	if nowPrepared {
 		slot.prepared = true
@@ -412,7 +430,7 @@ func (n *PBFTNode) handleCommit(message *Commit) {
 			request:   info.request,
 		}
 		if message.Number.SeqNumber > n.sequenceNumber {
-			n.sequenceNumber = message.Number.SeqNumber + 1
+			n.sequenceNumber = message.Number.SeqNumber
 		}
 	}
 	n.log[message.Number] = slot
@@ -422,6 +440,95 @@ func (n *PBFTNode) handleCommit(message *Commit) {
 		n.Log("COMMITTED %+v", message.Number)
 		n.Committed() <- &Operation{Opcode: message.Message.Opcode, Op: message.Message.Op}
 	}
+}
+
+type requestView struct {
+	request ClientRequest
+	view    int
+}
+
+// Section 4.4 in paper
+// O is computed as follows:
+// 1. The primary determines the sequence number min-s of the
+//    last stable checkpoint in V and the highest sequence
+//    number max-s in a prepare message in V.
+// 2. The primary creates a new pre-prepare message for view
+//    v+1 for each sequence number n between min-s and max-s.
+//    There are two cases:
+//    1. There is at least one set in the P component of some
+//       view-change message in V with sequence number n.
+//       Primary creates Pre-prepare with the request digest
+//       in the pre-prepare message for n with the highest
+//       view number in V.
+//    2. There is no set in P of any view-change message in V
+//       with sequence number n.
+//       Primary creates Pre-prepare with a no-op message.
+// Then the primary appends the messages in O to its log.
+// Then enters new view.
+func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]PrePrepareFull {
+	// 1. The primary determines the sequence number min-s of the
+	//    latest stable checkpoint in V and the highest sequence
+	//    number max-s in a prepare message in V.
+	minS := n.lastCheckpoint.SeqNumber
+	maxS := n.lastCheckpoint.SeqNumber
+	seqNums := make(map[int]requestView)
+	for _, viewChange := range n.viewChange.messages {
+		// 1a. Get the latest stable checkpoint in V
+		if viewChange.Checkpoint.SeqNumber > minS {
+			minS = viewChange.Checkpoint.SeqNumber
+		}
+		for num, prepareproof := range viewChange.Proofs {
+			// 1b. Get the highest sequence number in any prepare message.
+			//     We also want to record the ClientRequest messages
+			//     for all the sequence numbers (we choose the ones with
+			//     the highest view numbers), for part (2).
+			reqInfo := requestView{
+				view:    num.ViewNumber,
+				request: prepareproof.Preprepare.Request,
+			}
+			if prevReqInfo, ok := seqNums[num.SeqNumber]; ok {
+				// if it exists, only replace if this one has a higher viewnum
+				if reqInfo.view > prevReqInfo.view {
+					seqNums[num.SeqNumber] = reqInfo
+				}
+			} else {
+				// if it doesn't exist already
+				seqNums[num.SeqNumber] = reqInfo
+			}
+			if maxS < num.SeqNumber {
+				maxS = num.SeqNumber
+			}
+		}
+	}
+	n.Log("sending prepares for messages between %d and %d", minS, maxS)
+	// 2. The primary creates a new pre-prepare message for view
+	//    v+1 for each sequence number n between min-s and max-s.
+	preprepares := make(map[SlotId]PrePrepareFull)
+	for s := minS; s <= maxS; s++ {
+		slotId := SlotId{
+			ViewNumber: view,
+			SeqNumber:  s,
+		}
+		var request ClientRequest
+		//    There are two cases:
+		if reqInfo, ok := seqNums[s]; ok {
+			//    1. There is at least one set in the P component of some
+			//       view-change message in V with sequence number n.
+			//       Primary creates Pre-prepare with the request digest
+			//       in the pre-prepare message for n with the highest
+			//       view number in V.
+			request = reqInfo.request
+		} else {
+			//    2. There is no such set.
+			//       Primary creates Pre-prepare with a no-op message.
+			request = ClientRequest{}
+		}
+		preprepares[slotId] = PrePrepareFull{
+			PrePrepareMessage: PrePrepare{Number: slotId},
+			Request:           request,
+		}
+	}
+	return preprepares
 }
 
 func (n *PBFTNode) handleViewChange(message *ViewChange) {
@@ -440,7 +547,7 @@ func (n *PBFTNode) handleViewChange(message *ViewChange) {
 		currentView = n.viewNumber
 	}
 	// 0. Update most recently seen viewchange message from this node
-	n.viewChange.messages[message.Node] = message
+	n.viewChange.messages[message.Node] = *message
 	// 1. If a replica receives a set of f+1 valid view change messages
 	// from other replicas for views higher than its current view...
 	if message.ViewNumber > currentView {
@@ -476,11 +583,13 @@ func (n *PBFTNode) handleViewChange(message *ViewChange) {
 				votes += 1
 			}
 		}
-		// 2. If so, multicast new-view
+		// 2. If so, multicast new-view (heartbeat)
 		if votes >= (2 * len(n.peermap) / 3) {
 			newview := NewView{
-				ViewNumber: message.ViewNumber,
-				Node:       n.id,
+				ViewNumber:  message.ViewNumber,
+				ViewChanges: n.viewChange.messages,
+				PrePrepares: n.generatePrepreparesForNewView(message.ViewNumber),
+				Node:        n.id,
 			}
 			n.newView = &newview
 			n.caughtUpMux.Lock()
@@ -611,6 +720,26 @@ func (n *PBFTNode) startTimers() {
 
 // ** VIEW CHANGES ** //
 
+func (n *PBFTNode) generateProofsSinceCheckpoint() map[SlotId]PreparedProof {
+	proofs := make(map[SlotId]PreparedProof)
+	for id, slot := range n.log {
+		if n.lastCheckpoint.Before(id) && n.isPrepared(slot) {
+			proofs[id] = PreparedProof{
+				Number:     id,
+				Preprepare: *slot.preprepare,
+				Prepares:   slot.prepares,
+			}
+		}
+	}
+	return proofs
+}
+
+// Section 4.4
+// If the timer of backup i expires in view v, it starts
+// a view change to move the system to view v + 1.
+// It stops accepting messages (other than checkpoint,
+// view-change, and new-view) and multicasts a view-change
+// to all other replicas.
 func (n *PBFTNode) startViewChange(view int) {
 	if n.viewChange.viewNumber > view || n.viewChange.inProgress && n.viewChange.viewNumber == view {
 		return
@@ -619,8 +748,11 @@ func (n *PBFTNode) startViewChange(view int) {
 	n.viewChange.inProgress = true
 	n.viewChange.viewNumber = view
 	message := ViewChange{
-		ViewNumber: view,
-		Node:       n.id,
+		ViewNumber:      view,
+		Checkpoint:      n.lastCheckpoint,
+		CheckpointProof: n.checkpointProof,
+		Proofs:          n.generateProofsSinceCheckpoint(),
+		Node:            n.id,
 	}
 	// TODO (sydli): instead of stopping this timer, use it for exponential backoff
 	n.stopTimers()
@@ -631,7 +763,6 @@ func (n *PBFTNode) enterNewView(view int) {
 	n.Log("ENTER NEW VIEW FOR VIEW %d", view)
 	n.viewChange.inProgress = false
 	n.viewNumber = view
-	n.sequenceNumber = 0
 	n.startTimers()
 }
 
@@ -660,31 +791,49 @@ func (n PBFTNode) GetCheckpoint() (interface{}, error) {
 }
 
 func (n PBFTNode) ClientRequest(req *ClientRequest, res *Ack) error {
+	if n.down {
+		return errors.New("I'm down")
+	}
 	n.requestChannel <- req
 	return nil
 }
 
 func (n PBFTNode) PrePrepare(req *PrePrepareFull, res *Ack) error {
+	if n.down {
+		return errors.New("I'm down")
+	}
 	n.preprepareChannel <- req
 	return nil
 }
 
 func (n PBFTNode) Prepare(req *Prepare, res *Ack) error {
+	if n.down {
+		return errors.New("I'm down")
+	}
 	n.prepareChannel <- req
 	return nil
 }
 
 func (n PBFTNode) Commit(req *Commit, res *Ack) error {
+	if n.down {
+		return errors.New("I'm down")
+	}
 	n.commitChannel <- req
 	return nil
 }
 
 func (n PBFTNode) ViewChange(req *ViewChange, res *Ack) error {
+	if n.down {
+		return errors.New("I'm down")
+	}
 	n.viewChangeChannel <- req
 	return nil
 }
 
 func (n PBFTNode) NewView(req *NewView, res *Ack) error {
+	if n.down {
+		return errors.New("I'm down")
+	}
 	n.newViewChannel <- req
 	return nil
 }
