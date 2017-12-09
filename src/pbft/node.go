@@ -41,6 +41,9 @@ type PBFTNode struct {
 	errorChannel     chan error
 	committedChannel chan *string
 
+	// Requests: did they finish yet?
+	requests map[[sha256.Size]byte]requestInfo
+
 	// local key grabbing hack
 	KeyRequest chan *KeyRequest // hostname
 
@@ -78,6 +81,11 @@ type PBFTNode struct {
 	slow bool
 }
 
+type requestInfo struct {
+	committed bool
+	// also info about the reply that we sent
+}
+
 // Information associated with current view change.
 type viewChangeInfo struct {
 	messages   map[NodeId]*ViewChange
@@ -90,7 +98,7 @@ type KeyRequest struct {
 	Reply    chan *string
 }
 
-const TIMEOUT time.Duration = time.Duration(5 * time.Second)
+const TIMEOUT time.Duration = time.Duration(time.Second)
 
 // Entry point for each PBFT node.
 // NodeConfig: configuration for this node
@@ -125,17 +133,18 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		viewChangeChannel:     make(chan *ViewChange),
 		newViewChannel:        make(chan *NewView),
 		requestTimeoutChannel: make(chan bool),
-		log:                  make(map[SlotId]*Slot),
-		viewNumber:           0,
-		sequenceNumber:       0,
-		issuedSequenceNumber: 0,
-		viewChange:           &viewChangeInfo{inProgress: false, viewNumber: 0, messages: make(map[NodeId]*ViewChange)},
-		heartbeatTicker:      nil,
-		timeoutTimer:         nil,
-		caughtUp:             make(map[NodeId]bool),
-		newView:              &NewView{ViewNumber: 0, Node: host.Id},
-		down:                 false,
-		slow:                 false,
+		requests:              make(map[[sha256.Size]byte]requestInfo),
+		log:                   make(map[SlotId]*Slot),
+		viewNumber:            0,
+		sequenceNumber:        0,
+		issuedSequenceNumber:  0,
+		viewChange:            &viewChangeInfo{inProgress: false, viewNumber: 0, messages: make(map[NodeId]*ViewChange)},
+		heartbeatTicker:       nil,
+		timeoutTimer:          nil,
+		caughtUp:              make(map[NodeId]bool),
+		newView:               &NewView{ViewNumber: 0, Node: host.Id},
+		down:                  false,
+		slow:                  false,
 	}
 	for p, _ := range node.peermap {
 		node.caughtUp[p] = true
@@ -272,9 +281,19 @@ func (n *PBFTNode) handleClientRequest(request *string) {
 	if n.viewChange.inProgress {
 		return
 	}
+	requestDigest, err := util.GenerateDigest(*request)
+	if _, ok := n.requests[requestDigest]; ok {
+		// we've already processed this client request
+		return
+	}
+	n.requests[requestDigest] = requestInfo{committed: false}
 
 	if n.isPrimary() {
 		if request == nil {
+			return
+		}
+		if err != nil {
+			n.Log(err.Error())
 			return
 		}
 		n.issuedSequenceNumber = n.issuedSequenceNumber + 1
@@ -282,15 +301,7 @@ func (n *PBFTNode) handleClientRequest(request *string) {
 			ViewNumber: n.viewNumber,
 			SeqNumber:  n.issuedSequenceNumber + 1,
 		}
-
 		n.Log("Received new request - View Number: %d, Sequence Number: %d", n.viewNumber, n.sequenceNumber)
-
-		requestDigest, err := util.GenerateDigest(*request)
-		if err != nil {
-			n.Log(err.Error())
-			return
-		}
-
 		fullMessage := PrePrepareFull{
 			PrePrepareMessage: PrePrepare{
 				Number:        id,
@@ -300,7 +311,6 @@ func (n *PBFTNode) handleClientRequest(request *string) {
 			Request: *request,
 		}
 		fullMessage.PrePrepareMessage.SetDigest()
-
 		n.log[id] = &Slot{
 			request:       request,
 			requestDigest: requestDigest,
@@ -311,7 +321,6 @@ func (n *PBFTNode) handleClientRequest(request *string) {
 			committed:     false,
 		}
 		go n.broadcast("PBFTNode.PrePrepare", &fullMessage, 0)
-
 	} else {
 		// forward to all ma frandz if im not da leader
 		go n.broadcast("PBFTNode.ClientRequest", request, 0)
