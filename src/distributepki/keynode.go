@@ -79,8 +79,6 @@ func handlerWithContext(kn *KeyNode) func(http.ResponseWriter, *http.Request) {
 			}
 			op.SetDigest()
 
-			plog.Infof("GET DIGEST: %+v", op.Digest)
-
 			if found, key := kn.LookupKey(&op, nil); found {
 				response = key
 			} else {
@@ -105,8 +103,6 @@ func handlerWithContext(kn *KeyNode) func(http.ResponseWriter, *http.Request) {
 				Op:     clientapi.Create{alias, key, time.Now(), nil},
 			}
 			op.SetDigest()
-
-			plog.Infof("POST DIGEST: %+v", op.Digest)
 
 			kn.CreateKey(&op, nil)
 			response := "Key creation submitted."
