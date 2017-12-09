@@ -3,6 +3,7 @@ package util
 import (
 	"github.com/coreos/pkg/capnslog"
 
+	"crypto/sha256"
 	"errors"
 	"net/rpc"
 	"strconv"
@@ -40,4 +41,8 @@ func SendRpc(hostName string, endpoint string, rpcFunction string, message inter
 	}
 	return nil
 
+}
+
+func GenerateDigest(s string) ([sha256.Size]byte, error) {
+	return sha256.Sum256([]byte(s)), nil
 }

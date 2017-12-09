@@ -10,7 +10,7 @@ const (
 
 type DebugMessage struct {
 	Op      DebugOp
-	Request ClientRequest
+	Request string
 }
 
 func (n *PBFTNode) Debug(req *DebugMessage, res *Ack) error {

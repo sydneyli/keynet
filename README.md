@@ -104,16 +104,17 @@ Depending on the current status of the project, that may not work.
 *this* means we're working on it
 
 ### core functionality
- - [ ] *Actually sign and verify reads* (JL)
- - [ ] *Catch up nodes properly (fancy stuff on new views, like in paper)* (syd)
+ - [X] Actually sign and verify reads
+ - [X] Catch up nodes properly (piggybacking entries on heartbeats
+       and re-preparing non-checkpointed entries)
  - [X] View changes on client request timeout & on heartbeat timeout
- - [ ] Checkpointing
-    * limit sequence nums properly (to a range)
-    * go through and make sure sequence numbers are being advanced correctly
+ - [ ] *Checkpointing* (JL)
+    * limit sequence nums properly
 
 ### not core, but also important
  - [ ] Check for resource leaks
- - [ ] tests?? l0l
+ - [X] tests?? l0l
+ - [X] moar tests
  - [ ] Reuse RPC connections
 
 # Implementation details
@@ -136,4 +137,8 @@ fully implemented view changes & retransmissions. We take a page from Raft's boo
 and have all nodes piggyback state information onto heartbeat messages. A node's
 response to the heartbeat can be its own most recently committed sequence number,
 so the primary knows what preprepares to rebroadcast to the node.
+
+### client/demo: colin
+ - [ ] CRX
+ - [ ] spin up mock cluster/email servers
 

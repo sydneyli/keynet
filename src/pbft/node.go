@@ -3,6 +3,7 @@ package pbft
 import (
 	"distributepki/util"
 
+	"crypto/sha256"
 	"errors"
 	"net"
 	"net/http"
@@ -26,7 +27,7 @@ type PBFTNode struct {
 	// MAIN MESSAGE CHANNELS.
 	// Main execution loop selects from these.
 	debugChannel          chan *DebugMessage
-	requestChannel        chan *ClientRequest
+	requestChannel        chan *string
 	preprepareChannel     chan *PrePrepareFull
 	prepareChannel        chan *Prepare
 	commitChannel         chan *Commit
@@ -38,7 +39,10 @@ type PBFTNode struct {
 	// We write to these when we learn the
 	// result of a client request.
 	errorChannel     chan error
-	committedChannel chan *Operation
+	committedChannel chan *string
+
+	// Requests: did they finish yet?
+	requests map[[sha256.Size]byte]requestInfo
 
 	// local key grabbing hack
 	KeyRequest chan *KeyRequest // hostname
@@ -52,13 +56,10 @@ type PBFTNode struct {
 	// Sequence numbers have to start at 1 for a subtle reason.
 	// a node with seqnum 0 hasn't yet "committed" to the
 	// current view.
-	log                  map[SlotId]Slot
+	log                  map[SlotId]*Slot
 	viewNumber           int
 	sequenceNumber       int
 	issuedSequenceNumber int
-
-	// Used to track execution of client requests
-	requests map[int64]requestInfo
 
 	// VIEW CHANGE STATE. We are in the middle of a viewchange
 	// if viewChange.inProgress.
@@ -87,6 +88,11 @@ type PBFTNode struct {
 	// Debug states
 	down bool
 	slow bool
+}
+
+type requestInfo struct {
+	committed bool
+	// also info about the reply that we sent
 }
 
 // Information associated with current view change.
@@ -131,17 +137,17 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		hostToPeer:            hostToPeer,
 		cluster:               cluster,
 		debugChannel:          make(chan *DebugMessage),
-		committedChannel:      make(chan *Operation),
+		committedChannel:      make(chan *string),
 		errorChannel:          make(chan error),
-		requestChannel:        make(chan *ClientRequest, 10), // some nice inherent rate limiting
+		requestChannel:        make(chan *string, 10), // some nice inherent rate limiting
 		preprepareChannel:     make(chan *PrePrepareFull),
 		prepareChannel:        make(chan *Prepare),
 		commitChannel:         make(chan *Commit),
 		viewChangeChannel:     make(chan *ViewChange),
 		newViewChannel:        make(chan *NewView),
 		requestTimeoutChannel: make(chan bool),
-		requests:              make(map[int64]requestInfo),
-		log:                   make(map[SlotId]Slot),
+		requests:              make(map[[sha256.Size]byte]requestInfo),
+		log:                   make(map[SlotId]*Slot),
 		viewNumber:            0,
 		sequenceNumber:        1,
 		issuedSequenceNumber:  1,
@@ -158,6 +164,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 	for p, _ := range node.peermap {
 		node.caughtUp[p] = 1
 	}
+
 	// 3. Start RPC server
 	server := rpc.NewServer()
 	server.Register(&node)
@@ -194,16 +201,17 @@ func (n PBFTNode) Error(format string, args ...interface{}) {
 }
 
 // ensure mapping from SlotId exists in PBFTNode
-func (n *PBFTNode) ensureMapping(num SlotId) Slot {
+func (n *PBFTNode) ensureMapping(num SlotId) *Slot {
 	slot, ok := n.log[num]
 	if !ok {
 		slot = Slot{
-			request:    nil,
-			preprepare: nil,
-			prepares:   make(map[NodeId]Prepare),
-			commits:    make(map[NodeId]*Commit),
-			prepared:   false,
-			committed:  false,
+			request:       nil,
+			requestDigest: [sha256.Size]byte{},
+			preprepare:    nil,
+			prepares:      make(map[NodeId]Prepare),
+			commits:       make(map[NodeId]*Commit),
+			prepared:      false,
+			committed:     false,
 		}
 		n.log[num] = slot
 	}
@@ -236,18 +244,17 @@ func (n PBFTNode) getPrimary() (NodeId, string) {
 	return NodeId(0), ""
 }
 
-func (n PBFTNode) isPrepared(slot Slot) bool {
+func (n PBFTNode) isPrepared(slot *Slot) bool {
 	// # Prepares received >= 2f = 2 * ((N - 1) / 3)
 	return slot.preprepare != nil && len(slot.prepares) >= 2*(len(n.peermap)/3)
 }
 
-func (n PBFTNode) isCommitted(slot Slot) bool {
+func (n PBFTNode) isCommitted(slot *Slot) bool {
 	// # Commits received >= 2f = 2 * ((N - 1) / 3)
 	return len(slot.commits) >= 2*(len(n.peermap)/3)
 }
 
 // ** ALL THE MESSAGE HANDLERS ** //
-
 // MAIN EXECUTION LOOP
 func (n *PBFTNode) handleMessages() {
 	for {
@@ -278,21 +285,23 @@ func (n *PBFTNode) handleMessages() {
 
 // does appropriate actions after receivin a client request
 // i.e. send out preprepares and stuff
-func (n *PBFTNode) handleClientRequest(request *ClientRequest) {
+func (n *PBFTNode) handleClientRequest(request *string) {
 	if n.viewChange.inProgress {
 		return
 	}
-	// don't re-process already processed requests
-	if _, ok := n.requests[request.Id]; ok {
-		return // return with answer?
+	requestDigest, err := util.GenerateDigest(*request)
+	if _, ok := n.requests[requestDigest]; ok {
+		// we've already processed this client request
+		return
 	}
-	n.requests[request.Id] = requestInfo{
-		id:        request.Id,
-		committed: false,
-		request:   request,
-	}
+	n.requests[requestDigest] = requestInfo{committed: false}
+
 	if n.isPrimary() {
 		if request == nil {
+			return
+		}
+		if err != nil {
+			n.Log(err.Error())
 			return
 		}
 		n.issuedSequenceNumber = n.issuedSequenceNumber + 1
@@ -301,36 +310,49 @@ func (n *PBFTNode) handleClientRequest(request *ClientRequest) {
 			ViewNumber: n.viewNumber,
 			SeqNumber:  n.issuedSequenceNumber,
 		}
+		n.Log("Received new request - View Number: %d, Sequence Number: %d", n.viewNumber, n.sequenceNumber)
 		fullMessage := PrePrepareFull{
 			PrePrepareMessage: PrePrepare{
-				Number: id,
+				Number:        id,
+				RequestDigest: requestDigest,
+				Digest:        [sha256.Size]byte{},
 			},
 			Request: *request,
 		}
 		n.log[id] = Slot{
-			request:    request,
-			preprepare: &fullMessage,
-			prepares:   make(map[NodeId]Prepare),
-			commits:    make(map[NodeId]*Commit),
-			prepared:   false,
-			committed:  false,
+			request:       request,
+			requestDigest: requestDigest,
+			preprepare:    &fullMessage.PrePrepareMessage,
+			prepares:      make(map[NodeId]Prepare),
+			commits:       make(map[NodeId]*Commit),
+			prepared:      false,
+			committed:     false,
 		}
 		go n.broadcast("PBFTNode.PrePrepare", &fullMessage, 0)
 	} else {
 		// forward to all ma frandz if im not da leader
 		// TODO: they should probably just forward it to the leader
 		go n.broadcast("PBFTNode.ClientRequest", request, 0)
+		// primaryId, primaryHostname := n.getPrimary()
+		// n.Log("primary id: %d", primaryId)
+		// go sendRpc(n.id, primaryId, primaryHostname, "PBFTNode.ClientRequest", n.cluster.Endpoint, request, nil, 5)
 
-		// start execution timer...
-		go func(n *PBFTNode) {
-			<-time.After(TIMEOUT)
-			if !n.requests[request.Id].committed {
-				n.requestTimeoutChannel <- true
-			}
-		}(n)
+		// TODO: do some sort of timeout for a view change
+		/*
+			// start execution timer...
+			go func(n *PBFTNode) {
+				<-time.After(TIMEOUT)
+				if !n.requests[request.Id].committed {
+					n.requestTimeoutChannel <- true
+				}
+			}(n)
+		*/
 	}
 }
 
+// TODO: verification should include:
+//     1. only the leader of the specified view can send preprepares
+// TODO: handle high, low water marks (Paper 4.2)
 func (n *PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
 	if n.viewChange.inProgress || n.isPrimary() {
 		return
@@ -346,31 +368,60 @@ func (n *PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
 	// TODO: Drop invalid Preprepares...
 	// verification should include:
 	//     1. only the leader of the specified view can send preprepares
-	preprepareMessage := preprepare.PrePrepareMessage
 	n.timeoutTimer.Reset(n.getTimeout())
+
+	preprepareMessage := preprepare.PrePrepareMessage
 	if preprepareMessage == (PrePrepare{}) {
 		//NO-OP heartbeat... don't bother processing
 		return
 	}
+	if !preprepareMessage.DigestValid() {
+		n.Log("Error: PrePrepare digest does not match data")
+		return
+	}
+
+	requestDigest, err := util.GenerateDigest(preprepare.Request)
+	if err != nil {
+		n.Log(err.Error())
+		return
+	}
+
+	if preprepareMessage.RequestDigest != requestDigest {
+		n.Log("Error: PrePrepare request digest does not match the request data")
+		return
+	}
+
+	slot := n.ensureMapping(preprepareMessage.Number)
+
+	// XXX: assumes that it's correct to NOT resend Prepares if we've already seen or sent the PrePrepare (i.e. request != nil)
+	if slot.request != nil {
+		if slot.requestDigest != preprepareMessage.RequestDigest {
+			plog.Errorf("Received pre-prepare for slot id %+v with mismatched digest.", preprepareMessage.Number)
+		}
+		return
+	}
+
 	newSeqNum := preprepare.PrePrepareMessage.Number.SeqNumber
 	if newSeqNum > n.issuedSequenceNumber {
 		n.issuedSequenceNumber = newSeqNum
 	}
+
+	slot.request = &preprepare.Request
+	slot.requestDigest = preprepareMessage.RequestDigest
+	slot.preprepare = &preprepareMessage
+
+	// TODO: iterate through potentially existing Prepare and Commit entries and check hashes, throw away non-matching with warning
+
 	prepare := Prepare{
-		Number:  preprepareMessage.Number,
-		Message: preprepare.Request,
-		Node:    n.id,
+		Number:        preprepareMessage.Number,
+		RequestDigest: preprepareMessage.RequestDigest,
+		Node:          n.id,
+		Digest:        [sha256.Size]byte{},
 	}
-	matchingSlot := n.ensureMapping(preprepareMessage.Number)
-	if matchingSlot.preprepare != nil {
-		//TODO: Only throw here if digest is different
-		// n.Error("Received more than one pre-prepare for slot id %+v", preprepareMessage.Number)
-		return
-	}
-	matchingSlot.request = &preprepare.Request
-	matchingSlot.preprepare = preprepare
-	n.log[preprepareMessage.Number] = matchingSlot
-	// TODO: handlePrepare here (accept prepare for self)
+	prepare.SetDigest()
+
+	slot.prepares[n.id] = &prepare
+	log[preprepareMessage.Number].preprepare = preprepare.PrePrepareMessage
 	go n.broadcast("PBFTNode.Prepare", &prepare, 0)
 }
 
@@ -378,28 +429,31 @@ func (n *PBFTNode) handlePrepare(message *Prepare) {
 	if n.viewChange.inProgress {
 		return
 	}
-	// If we've already committed this message... don't bother
-	// if message.Number.BeforeOrEqual(SlotId{
-	// 	ViewNumber: n.viewNumber, SeqNumber: n.sequenceNumber}) {
-	// 	return
-	// }
-	// TODO: validate prepare message
-	slot := n.ensureMapping(message.Number)
-	//TODO: check that the prepare matches the pre-prepare message if it exists
-	slot.prepares[message.Node] = *message
-	prepared := n.isPrepared(slot)
-	if prepared {
-		slot.prepared = true
+
+	if !message.DigestValid() {
+		n.Log("Error: Prepare digest does not match data")
+		return
 	}
+
+	slot := n.ensureMapping(message.Number)
+	if slot.request != nil && slot.requestDigest != message.RequestDigest {
+		plog.Errorf("Received prepare for slot id %+v with mismatched digest.", message.Number)
+	}
+	slot.prepares[message.Node] = message
+
 	n.log[message.Number] = slot
-	if slot.prepared {
+	if !slot.prepared && n.isPrepared(slot) {
 		n.Log("PREPARED %+v", message.Number)
+		slot.prepared = true
+
 		commit := Commit{
-			Number:  message.Number,
-			Message: message.Message,
-			Node:    n.id,
+			Number:        message.Number,
+			RequestDigest: message.RequestDigest,
+			Node:          n.id,
+			Digest:        [sha256.Size]byte{},
 		}
-		// TODO: handleCommit here (accept commit for self)
+		commit.SetDigest()
+		slot.commits[n.id] = &commit
 		go n.broadcast("PBFTNode.Commit", &commit, 0)
 	}
 }
@@ -408,24 +462,27 @@ func (n *PBFTNode) handleCommit(message *Commit) {
 	if n.viewChange.inProgress {
 		return
 	}
-	// TODO: validate commit message
-	/*
-		// TODO: come back and fix validation
-		if message.Number.Before(n.mostRecentCommitted) {
-			return // ignore outdated slots
-		}
-	*/
+
+	if !message.DigestValid() {
+		n.Log("Error: Commit digest does not match data")
+		return
+	}
+
 	slot := n.ensureMapping(message.Number)
+	if slot.request != nil && slot.requestDigest != message.RequestDigest {
+		plog.Errorf("Received commit for slot id %+v with mismatched digest.", message.Number)
+	}
 	slot.commits[message.Node] = message
-	nowCommitted := !slot.committed && n.isCommitted(slot)
-	if nowCommitted {
+
+	if !slot.committed && n.isCommitted(slot) {
+		n.Log("COMMITTED %+v", message.Number)
 		slot.committed = true
-		info := n.requests[message.Message.Id] //.committed = true
-		n.requests[message.Message.Id] = requestInfo{
-			id:        info.id,
-			committed: true,
-			request:   info.request,
-		}
+		// info := n.requests[message.Message.Id] //.committed = true
+		// n.requests[message.Message.Id] = requestInfo{
+		// 	id:        info.id,
+		// 	committed: true,
+		// 	request:   info.request,
+		// }
 		if message.Number.SeqNumber > n.sequenceNumber {
 			n.sequenceNumber = message.Number.SeqNumber
 		}
@@ -433,9 +490,11 @@ func (n *PBFTNode) handleCommit(message *Commit) {
 	n.log[message.Number] = slot
 	if nowCommitted {
 		// TODO: try to execute as many sequential queries as possible and
-		// then reply to the clients via committedChannel
-		n.Log("COMMITTED %+v", message.Number)
-		n.Committed() <- &Operation{Opcode: message.Message.Opcode, Op: message.Message.Op}
+		// then reply to the clients via committedChannel. Figure out what
+		// the highest committed operation sequence number was and apply
+		// up to that
+		// TODO: fix this
+		n.Committed() <- slot.request
 	}
 }
 
@@ -670,7 +729,7 @@ func (n *PBFTNode) heartbeatMessage(peerSequence int) PrePrepareFull {
 	if n.sequenceNumber == peerSequence {
 		return PrePrepareFull{
 			PrePrepareMessage: PrePrepare{},
-			Request:           ClientRequest{},
+			Request:           "",
 		}
 	}
 	slot := SlotId{
@@ -806,23 +865,16 @@ func (n *PBFTNode) enterNewView(view int) {
 	n.startTimers()
 }
 
-// ** Protocol **//
-
 func (n PBFTNode) Failure() chan error {
 	return n.errorChannel
 }
 
-func (n PBFTNode) Committed() chan *Operation {
+func (n PBFTNode) Committed() chan *string {
 	return n.committedChannel
 }
 
-func (n *PBFTNode) Propose(operation Operation) {
-	request := new(ClientRequest)
-	request.Opcode = operation.Opcode
-	request.Timestamp = operation.Timestamp
-	request.Id = operation.Timestamp.UnixNano()
-	request.Op = operation.Op
-	n.requestChannel <- request
+func (n *PBFTNode) Propose(operation *string) {
+	n.requestChannel <- operation
 }
 
 func (n PBFTNode) GetCheckpoint() (interface{}, error) {
@@ -830,7 +882,7 @@ func (n PBFTNode) GetCheckpoint() (interface{}, error) {
 	return nil, nil
 }
 
-func (n PBFTNode) ClientRequest(req *ClientRequest, res *Ack) error {
+func (n PBFTNode) ClientRequest(req *string, res *Ack) error {
 	if n.down {
 		return errors.New("I'm down")
 	}

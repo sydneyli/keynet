@@ -1,31 +1,10 @@
 package pbft
 
 import (
+	"crypto/sha256"
 	"net"
 	"time"
 )
-
-type Operation struct {
-	Opcode    int
-	Timestamp time.Time
-	Op        string
-}
-
-type requestInfo struct {
-	id        int64
-	committed bool
-	request   *ClientRequest
-}
-
-// REQUEST:
-// op, timestamp, client addr (signed by client)
-type ClientRequest struct {
-	Id        int64 // to prevent request replay
-	Opcode    int
-	Op        string
-	Timestamp time.Time
-	Client    net.Addr
-}
 
 // REPLY:
 // viewnum, timestamp, client addr, node addr, result
@@ -36,13 +15,16 @@ type ClientReply struct {
 	timestamp  time.Time
 	client     net.Addr
 	node       net.Addr
+	digest     [sha256.Size]byte
 }
 
 // PRE-PREPARE:
 // viewnum, seqnum, client message (digest)
 // (signed by node)
 type PrePrepare struct {
-	Number SlotId
+	Number        SlotId
+	RequestDigest [sha256.Size]byte
+	Digest        [sha256.Size]byte
 }
 
 // hehehe peepee
@@ -52,25 +34,27 @@ type PPResponse struct {
 
 type PrePrepareFull struct {
 	PrePrepareMessage PrePrepare
-	Request           ClientRequest
+	Request           string
 }
 
 // PREPARE:
 // viewnum, seqnum, client message (digest), node addr
 // (signed by node i)
 type Prepare struct {
-	Number  SlotId
-	Message ClientRequest
-	Node    NodeId
+	Number        SlotId
+	RequestDigest [sha256.Size]byte
+	Node          NodeId
+	Digest        [sha256.Size]byte
 }
 
 // COMMIT:
 // viewnum, seqnum, client message (digest), node addr
 // (signed by node i)
 type Commit struct {
-	Number  SlotId
-	Message ClientRequest
-	Node    NodeId
+	Number        SlotId
+	RequestDigest [sha256.Size]byte
+	Node          NodeId
+	Digest        [sha256.Size]byte
 }
 
 // The checkpoint protocol is used to advance the low and high
@@ -106,6 +90,7 @@ type ViewChange struct {
 	CheckpointProof map[NodeId]Checkpoint    // C
 	Proofs          map[SlotId]PreparedProof // P
 	Node            NodeId                   // i
+	Digest          [sha256.Size]byte
 }
 
 func (v ViewChange) verify() bool {
@@ -122,6 +107,7 @@ type NewView struct {
 	ViewChanges map[NodeId]ViewChange     // V
 	PrePrepares map[SlotId]PrePrepareFull // O
 	Node        NodeId                    // i
+	Digest      [sha256.Size]byte
 }
 
 // Backup verifies O, multicasts prepares for every message
