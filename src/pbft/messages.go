@@ -1,31 +1,10 @@
 package pbft
 
 import (
+	"crypto/sha256"
 	"net"
 	"time"
 )
-
-type Operation struct {
-	Opcode    int
-	Timestamp time.Time
-	Op        string
-}
-
-type requestInfo struct {
-	id        int64
-	committed bool
-	request   *ClientRequest
-}
-
-// REQUEST:
-// op, timestamp, client addr (signed by client)
-type ClientRequest struct {
-	Id        int64 // to prevent request replay
-	Opcode    int
-	Op        string
-	Timestamp time.Time
-	Client    net.Addr
-}
 
 // REPLY:
 // viewnum, timestamp, client addr, node addr, result
@@ -36,36 +15,41 @@ type ClientReply struct {
 	timestamp  time.Time
 	client     net.Addr
 	node       net.Addr
+	digest     [sha256.Size]byte
 }
 
 // PRE-PREPARE:
 // viewnum, seqnum, client message (digest)
 // (signed by node)
 type PrePrepare struct {
-	Number SlotId
+	Number        SlotId
+	RequestDigest [sha256.Size]byte
+	Digest        [sha256.Size]byte
 }
 
 type PrePrepareFull struct {
 	PrePrepareMessage PrePrepare
-	Request           ClientRequest
+	Request           string
 }
 
 // PREPARE:
 // viewnum, seqnum, client message (digest), node addr
 // (signed by node i)
 type Prepare struct {
-	Number  SlotId
-	Message ClientRequest
-	Node    NodeId
+	Number        SlotId
+	RequestDigest [sha256.Size]byte
+	Node          NodeId
+	Digest        [sha256.Size]byte
 }
 
 // COMMIT:
 // viewnum, seqnum, client message (digest), node addr
 // (signed by node i)
 type Commit struct {
-	Number  SlotId
-	Message ClientRequest
-	Node    NodeId
+	Number        SlotId
+	RequestDigest [sha256.Size]byte
+	Node          NodeId
+	Digest        [sha256.Size]byte
 }
 
 // TODO: include all proofs/verification stuff
@@ -77,7 +61,8 @@ type ViewChange struct {
 	// n: last checkpoint sequence num
 	// C: Proof of checkpoint at n
 	// P: Proof of all requests after n
-	Node NodeId
+	Node   NodeId
+	Digest [sha256.Size]byte
 }
 
 func (v ViewChange) verify() bool {
@@ -92,7 +77,8 @@ type NewView struct {
 	// V: set of valid view-change messages
 	// O: a set of pre-prepare messages
 	// TODO (sydli): I have no idea what O is
-	Node NodeId
+	Node   NodeId
+	Digest [sha256.Size]byte
 }
 
 func (v NewView) verify() bool {

@@ -1,6 +1,7 @@
 package util
 
 import (
+	"crypto/sha256"
 	"net/rpc"
 	"strconv"
 	"time"
@@ -32,4 +33,8 @@ func SendRpc(hostName string, endpoint string, rpcFunction string, message inter
 	}
 	return nil
 
+}
+
+func GenerateDigest(s string) ([sha256.Size]byte, error) {
+	return sha256.Sum256([]byte(s)), nil
 }

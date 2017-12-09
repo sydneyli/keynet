@@ -87,6 +87,7 @@ func (h *client) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// TODO: do digest/signing for client <-> keynode level
 		args := &server.Create{
 			Alias: alias,
 			Key:   keystore.Key(val),

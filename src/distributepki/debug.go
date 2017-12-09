@@ -3,7 +3,10 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"distributepki/clientapi"
+	"distributepki/keystore"
 	"distributepki/util"
+	"encoding/gob"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -153,15 +156,22 @@ func StartDebugRepl(cluster *pbft.ClusterConfig) {
 		case "put":
 			extractPutParams(cluster, cmdList[1:], doPut)
 		case "commit":
+			req := clientapi.KeyOperation{
+				OpCode: clientapi.OP_CREATE,
+				Op:     clientapi.Create{"bingo", keystore.Key(""), time.Now(), nil},
+			}
+			req.SetDigest()
+
+			var buf bytes.Buffer
+			if err := gob.NewEncoder(&buf).Encode(req); err != nil {
+				plog.Error(err)
+				return
+			}
+
 			sendPbft(cluster, cmdList[1:], pbft.DebugMessage{
-				Op: pbft.PUT,
-				Request: pbft.ClientRequest{
-					Opcode:    OP_CREATE,
-					Op:        "bingo",
-					Id:        time.Now().UnixNano(),
-					Timestamp: time.Now(),
-					Client:    nil,
-				}})
+				Op:      pbft.PUT,
+				Request: buf.String(),
+			})
 		case "up":
 			sendPbft(cluster, cmdList[1:], pbft.DebugMessage{Op: pbft.UP})
 		case "down":

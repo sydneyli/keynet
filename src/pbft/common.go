@@ -54,12 +54,13 @@ type SlotId struct {
 }
 
 type Slot struct {
-	request    *ClientRequest
-	preprepare *PrePrepareFull
-	prepares   map[NodeId]*Prepare
-	commits    map[NodeId]*Commit
-	prepared   bool
-	committed  bool
+	request       *string
+	requestDigest [sha256.Size]byte
+	preprepare    *PrePrepare
+	prepares      map[NodeId]*Prepare
+	commits       map[NodeId]*Commit
+	prepared      bool
+	committed     bool
 }
 
 func (slot SlotId) Before(other SlotId) bool {

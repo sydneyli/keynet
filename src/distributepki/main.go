@@ -1,8 +1,10 @@
 package main
 
 import (
+	"distributepki/clientapi"
 	"distributepki/keystore"
 	"distributepki/util"
+	"encoding/gob"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -31,8 +33,12 @@ func main() {
 	debug := flag.Bool("debug", false, "with cluster flag, enables debugging. without cluster flag, starts debugging repl")
 	id := flag.Int("id", 1, "Node ID to start")
 	keystoreFile := flag.String("keys", "keys.json", "Initial keys in store")
-
 	flag.Parse()
+
+	// Register Gob types
+	gob.Register(clientapi.Create{})
+	gob.Register(clientapi.Update{})
+	gob.Register(clientapi.Lookup{})
 
 	log.Infof("Reading cluster configuration from %s...", *configFile)
 	configData, err := ioutil.ReadFile(*configFile)
