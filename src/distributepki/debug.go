@@ -59,11 +59,11 @@ func sendPbft(cluster *pbft.ClusterConfig, args []string, message pbft.DebugMess
 }
 
 // TODO (sydli): clean up below code (get better at go)
-func doPut(cluster *pbft.ClusterConfig, node *pbft.NodeConfig, alias string, key string) {
+func doPut(cluster *pbft.ClusterConfig, node *pbft.NodeConfig, alias string, key string) string {
 	req, err := http.NewRequest("POST", "http://"+util.GetHostname(node.Host, node.ClientPort), bytes.NewBuffer([]byte(key)))
 	if err != nil {
 		log.Print(err)
-		return
+		return ""
 	}
 	q := req.URL.Query()
 	q.Add("name", alias)
@@ -73,21 +73,21 @@ func doPut(cluster *pbft.ClusterConfig, node *pbft.NodeConfig, alias string, key
 	if err != nil {
 		fmt.Println("Errored when sending request to the server")
 		fmt.Println(err)
-		return
+		return ""
 	}
 	defer resp.Body.Close()
 	resp_body, _ := ioutil.ReadAll(resp.Body)
 	fmt.Println(resp.Status)
 	fmt.Println(string(resp_body))
-	return
+	return resp.Status
 }
 
-func doGet(cluster *pbft.ClusterConfig, node *pbft.NodeConfig, alias string) {
+func doGet(cluster *pbft.ClusterConfig, node *pbft.NodeConfig, alias string) (string, string) {
 	// resp, err := http.Get("http://example.com/")
 	req, err := http.NewRequest("GET", "http://"+util.GetHostname(node.Host, node.ClientPort), nil)
 	if err != nil {
 		log.Print(err)
-		return
+		return "", ""
 	}
 	q := req.URL.Query()
 	q.Add("name", alias)
@@ -97,18 +97,18 @@ func doGet(cluster *pbft.ClusterConfig, node *pbft.NodeConfig, alias string) {
 	if err != nil {
 		fmt.Println("Errored when sending request to the server")
 		fmt.Println(err)
-		return
+		return "", ""
 	}
 	defer resp.Body.Close()
 	resp_body, _ := ioutil.ReadAll(resp.Body)
 	fmt.Println(resp.Status)
 	fmt.Println(string(resp_body))
-	return
+	return resp.Status, string(resp_body[:])
 }
 
 // curl
 func extractPutParams(cluster *pbft.ClusterConfig, args []string,
-	next func(*pbft.ClusterConfig, *pbft.NodeConfig, string, string)) {
+	next func(*pbft.ClusterConfig, *pbft.NodeConfig, string, string) string) {
 	if len(args) > 0 {
 		if node, err := extractNode(cluster, args[0]); err == nil {
 			if len(args) > 2 {
@@ -124,7 +124,7 @@ func extractPutParams(cluster *pbft.ClusterConfig, args []string,
 
 // curl
 func extractGetParams(cluster *pbft.ClusterConfig, args []string,
-	next func(*pbft.ClusterConfig, *pbft.NodeConfig, string)) {
+	next func(*pbft.ClusterConfig, *pbft.NodeConfig, string) (string, string)) {
 	if len(args) > 0 {
 		if node, err := extractNode(cluster, args[0]); err == nil {
 			if len(args) > 1 {
