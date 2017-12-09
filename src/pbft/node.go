@@ -309,7 +309,7 @@ func (n *PBFTNode) handleClientRequest(request *string) {
 			ViewNumber: n.viewNumber,
 			SeqNumber:  n.issuedSequenceNumber,
 		}
-		n.Log("Received new request - View Number: %d, Sequence Number: %d", n.viewNumber, n.sequenceNumber)
+		n.Log("Received new request - View Number: %d, Sequence Number: %d", n.viewNumber, n.issuedSequenceNumber)
 		fullMessage := PrePrepareFull{
 			PrePrepareMessage: PrePrepare{
 				Number:        id,
@@ -612,7 +612,9 @@ func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]PrePrepare
 			}
 		}
 	}
-	n.issuedSequenceNumber = maxS
+	if maxS > n.issuedSequenceNumber {
+		n.issuedSequenceNumber = maxS
+	}
 	return preprepares
 }
 
@@ -724,7 +726,7 @@ func (n *PBFTNode) getTimeout() time.Duration {
 	} else {
 		// When non-primaries timeout with no heartbeat,
 		// they start view change
-		return TIMEOUT * time.Duration(len(n.peermap))
+		return TIMEOUT * time.Duration(len(n.peermap)) / 2
 	}
 }
 
@@ -970,6 +972,6 @@ func broadcast(fromId NodeId, peers map[NodeId]string, rpcName string, endpoint 
 }
 
 func sendRpc(fromId NodeId, peerId NodeId, hostName string, rpcName string, endpoint string, message interface{}, response interface{}, retries int, timeout time.Duration) error {
-	plog.Infof("[Node %d] Sending RPC (%s) to Node %d", fromId, rpcName, peerId)
+	// plog.Infof("[Node %d] Sending RPC (%s) to Node %d", fromId, rpcName, peerId)
 	return util.SendRpc(hostName, endpoint, rpcName, message, response, retries, 0)
 }
