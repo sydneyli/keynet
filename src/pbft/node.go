@@ -419,7 +419,6 @@ func (n *PBFTNode) handleCommit(message *Commit) {
 	slot.commits[message.Node] = message
 	nowCommitted := !slot.committed && n.isCommitted(slot)
 	if nowCommitted {
-		n.Log("COMMITTED %+v", message.Number)
 		slot.committed = true
 		info := n.requests[message.Message.Id] //.committed = true
 		n.requests[message.Message.Id] = requestInfo{
@@ -502,37 +501,39 @@ func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]PrePrepare
 	// 2. The primary creates a new pre-prepare message for view
 	//    v+1 for each sequence number n between min-s and max-s.
 	preprepares := make(map[SlotId]PrePrepareFull)
-	for s := minS; s <= maxS; s++ {
-		slotId := SlotId{
-			ViewNumber: view,
-			SeqNumber:  s,
-		}
-		var request ClientRequest
-		//    There are two cases:
-		if reqInfo, ok := seqNums[s]; ok {
-			//    1. There is at least one set in the P component of some
-			//       view-change message in V with sequence number n.
-			//       Primary creates Pre-prepare with the request digest
-			//       in the pre-prepare message for n with the highest
-			//       view number in V.
-			request = reqInfo.request
-		} else {
-			//    2. There is no such set.
-			//       Primary creates Pre-prepare with a no-op message.
-			request = ClientRequest{}
-		}
-		preprepare := PrePrepareFull{
-			PrePrepareMessage: PrePrepare{Number: slotId},
-			Request:           request,
-		}
-		preprepares[slotId] = preprepare
-		n.log[slotId] = Slot{
-			request:    &request,
-			preprepare: &preprepare,
-			prepares:   make(map[NodeId]Prepare),
-			commits:    make(map[NodeId]*Commit),
-			prepared:   false,
-			committed:  false,
+	if minS < maxS {
+		for s := minS; s <= maxS; s++ {
+			slotId := SlotId{
+				ViewNumber: view,
+				SeqNumber:  s,
+			}
+			var request ClientRequest
+			//    There are two cases:
+			if reqInfo, ok := seqNums[s]; ok {
+				//    1. There is at least one set in the P component of some
+				//       view-change message in V with sequence number n.
+				//       Primary creates Pre-prepare with the request digest
+				//       in the pre-prepare message for n with the highest
+				//       view number in V.
+				request = reqInfo.request
+			} else {
+				//    2. There is no such set.
+				//       Primary creates Pre-prepare with a no-op message.
+				request = ClientRequest{}
+			}
+			preprepare := PrePrepareFull{
+				PrePrepareMessage: PrePrepare{Number: slotId},
+				Request:           request,
+			}
+			preprepares[slotId] = preprepare
+			n.log[slotId] = Slot{
+				request:    &request,
+				preprepare: &preprepare,
+				prepares:   make(map[NodeId]Prepare),
+				commits:    make(map[NodeId]*Commit),
+				prepared:   false,
+				committed:  false,
+			}
 		}
 	}
 	n.issuedSequenceNumber = maxS
@@ -698,9 +699,11 @@ func (n *PBFTNode) sendHeartbeat() {
 			rpcType = "PBFTNode.NewView"
 			msg = n.newView
 			after = func(id NodeId, response PPResponse, err error) {
-				n.caughtUpMux.Lock()
-				n.caughtUp[id] = 1
-				n.caughtUpMux.Unlock()
+				if err == nil {
+					n.caughtUpMux.Lock()
+					n.caughtUp[id] = 1
+					n.caughtUpMux.Unlock()
+				}
 			}
 		} else {
 			rpcType = "PBFTNode.PrePrepare"
@@ -799,7 +802,7 @@ func (n *PBFTNode) enterNewView(view int) {
 	n.Log("ENTER NEW VIEW FOR VIEW %d", view)
 	n.viewChange.inProgress = false
 	n.viewNumber = view
-	n.sequenceNumber = 0
+	n.sequenceNumber = 1
 	n.startTimers()
 }
 
