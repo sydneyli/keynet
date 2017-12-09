@@ -25,26 +25,20 @@ func logFatal(e error) {
 	}
 }
 
-func main() {
-	configFile := flag.String("config", "cluster.json", "PBFT configuration file")
-	cluster := flag.Bool("cluster", false, "Bootstrap entire cluster")
-	debug := flag.Bool("debug", false, "with cluster flag, enables debugging. without cluster flag, starts debugging repl")
-	id := flag.Int("id", 1, "Node ID to start")
-	keystoreFile := flag.String("keys", "keys.json", "Initial keys in store")
-
-	flag.Parse()
-
-	log.Infof("Reading cluster configuration from %s...", *configFile)
-	configData, err := ioutil.ReadFile(*configFile)
+func LoadConfig(filename string) pbft.ClusterConfig {
+	log.Infof("Reading cluster configuration from %s...", filename)
+	configData, err := ioutil.ReadFile(filename)
 	logFatal(err)
-
 	var config pbft.ClusterConfig
 	err = json.Unmarshal(configData, &config)
 	logFatal(err)
+	return config
+}
 
-	log.Infof("Reading initial keys from %s...", *keystoreFile)
+func LoadInitialKeys(filename string, config *pbft.ClusterConfig) map[string]string {
+	log.Infof("Reading initial keys from %s...", filename)
 
-	keyData, err := ioutil.ReadFile(*keystoreFile)
+	keyData, err := ioutil.ReadFile(filename)
 	logFatal(err)
 
 	var initialKeys []pbft.KeyPair
@@ -60,9 +54,22 @@ func main() {
 		initialKeyTable[string(kp.Alias)] = string(kp.Key)
 		log.Debugf("    %v => %v", kp.Alias, kp.Key)
 	}
+	return initialKeyTable
+}
+
+func main() {
+	configFile := flag.String("config", "cluster.json", "PBFT configuration file")
+	cluster := flag.Bool("cluster", false, "Bootstrap entire cluster")
+	debug := flag.Bool("debug", false, "with cluster flag, enables debugging. without cluster flag, starts debugging repl")
+	id := flag.Int("id", 1, "Node ID to start")
+	keystoreFile := flag.String("keys", "keys.json", "Initial keys in store")
+
+	flag.Parse()
+	config := LoadConfig(*configFile)
+	initialKeyTable := LoadInitialKeys(*keystoreFile, &config)
 
 	if *cluster {
-		StartCluster(&initialKeyTable, &config, *debug)
+		StartCluster(&initialKeyTable, &config, make(chan bool), *debug)
 	} else if *debug {
 		StartDebugRepl(&config)
 	} else {
@@ -70,7 +77,7 @@ func main() {
 	}
 }
 
-func StartCluster(initialKeyTable *map[string]string, cluster *pbft.ClusterConfig, debug bool) {
+func StartCluster(initialKeyTable *map[string]string, cluster *pbft.ClusterConfig, shutdown chan bool, debug bool) {
 	var nodeProcesses []*exec.Cmd
 	for _, n := range cluster.Nodes {
 		id := n.Id
@@ -91,7 +98,10 @@ func StartCluster(initialKeyTable *map[string]string, cluster *pbft.ClusterConfi
 	// If we get Ctrl+C, kill all subprocesses
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
-	<-c
+	select {
+	case <-c:
+	case <-shutdown:
+	}
 	for i, cmd := range nodeProcesses {
 		log.Infof("Kill process %d", i)
 		cmd.Process.Kill()
