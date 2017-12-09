@@ -49,6 +49,9 @@ type PBFTNode struct {
 	//////
 
 	// LEDGER (and where we are in it)
+	// Sequence numbers have to start at 1 for a subtle reason.
+	// a node with seqnum 0 hasn't yet "committed" to the
+	// current view.
 	log                  map[SlotId]Slot
 	viewNumber           int
 	sequenceNumber       int
@@ -74,8 +77,10 @@ type PBFTNode struct {
 	// LEADER STATE (to catch up stragglers)
 	// if some nodes aren't caught up, newView is broadcasted
 	// to them instead of regular PrePrepare heartbeats.
-	// note: caughtUp is written to in a goroutine, so we lock it.
-	caughtUp    map[NodeId]bool //are all my peers caught up?
+	// note: caughtUp is written to in a goroutine when peers reply
+	// to heartbeats, so we lock it.
+	// are all my peers caught up? map peer => current seqnum
+	caughtUp    map[NodeId]int
 	caughtUpMux sync.RWMutex
 	newView     *NewView // view message to continually broadcast
 
@@ -100,7 +105,7 @@ type KeyRequest struct {
 const TIMEOUT time.Duration = time.Duration(time.Second)
 
 // How many sequence numbers to wait before checkpointing
-const CHECKPOINT uint = 100
+const CHECKPOINT uint = 5
 
 // Entry point for each PBFT node.
 // NodeConfig: configuration for this node
@@ -138,20 +143,20 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		requests:              make(map[int64]requestInfo),
 		log:                   make(map[SlotId]Slot),
 		viewNumber:            0,
-		sequenceNumber:        0,
-		issuedSequenceNumber:  0,
+		sequenceNumber:        1,
+		issuedSequenceNumber:  1,
 		viewChange:            &viewChangeInfo{inProgress: false, viewNumber: 0, messages: make(map[NodeId]ViewChange)},
 		lastCheckpoint:        SlotId{ViewNumber: 0, SeqNumber: 0},
 		checkpointProof:       make(map[NodeId]Checkpoint),
 		heartbeatTicker:       nil,
 		timeoutTimer:          nil,
-		caughtUp:              make(map[NodeId]bool),
+		caughtUp:              make(map[NodeId]int),
 		newView:               &NewView{ViewNumber: 0, Node: host.Id},
 		down:                  false,
 		slow:                  false,
 	}
 	for p, _ := range node.peermap {
-		node.caughtUp[p] = true
+		node.caughtUp[p] = 1
 	}
 	// 3. Start RPC server
 	server := rpc.NewServer()
@@ -237,8 +242,8 @@ func (n PBFTNode) isPrepared(slot Slot) bool {
 }
 
 func (n PBFTNode) isCommitted(slot Slot) bool {
-	// # Commits received >= 2f + 1 = 2 * ((N - 1) / 3) + 1
-	return n.isPrepared(slot) && len(slot.commits) >= 2*(len(n.peermap)/3)+1
+	// # Commits received >= 2f = 2 * ((N - 1) / 3)
+	return len(slot.commits) >= 2*(len(n.peermap)/3)
 }
 
 // ** ALL THE MESSAGE HANDLERS ** //
@@ -247,6 +252,7 @@ func (n PBFTNode) isCommitted(slot Slot) bool {
 func (n *PBFTNode) handleMessages() {
 	for {
 		select {
+		// come from RPCS
 		case msg := <-n.debugChannel:
 			n.handleDebug(msg)
 		case msg := <-n.preprepareChannel:
@@ -257,14 +263,15 @@ func (n *PBFTNode) handleMessages() {
 			n.handlePrepare(msg)
 		case msg := <-n.commitChannel:
 			n.handleCommit(msg)
-		case <-n.requestTimeoutChannel: // one of my client requests timed out!
-			n.startViewChange(n.viewNumber + 1)
-		case <-n.getTimer(): // timer expired
-			n.handleHeartbeatTimeout()
 		case msg := <-n.viewChangeChannel:
 			n.handleViewChange(msg)
 		case msg := <-n.newViewChannel:
 			n.handleNewView(msg)
+		// Come from internal timers
+		case <-n.requestTimeoutChannel: // one of my client requests timed out!
+			n.startViewChange(n.viewNumber + 1)
+		case <-n.getTimer(): // timer expired
+			n.handleHeartbeatTimeout()
 		}
 	}
 }
@@ -272,9 +279,6 @@ func (n *PBFTNode) handleMessages() {
 // does appropriate actions after receivin a client request
 // i.e. send out preprepares and stuff
 func (n *PBFTNode) handleClientRequest(request *ClientRequest) {
-	if n.down {
-		return
-	}
 	if n.viewChange.inProgress {
 		return
 	}
@@ -328,10 +332,7 @@ func (n *PBFTNode) handleClientRequest(request *ClientRequest) {
 }
 
 func (n *PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
-	if n.down {
-		return
-	}
-	if n.viewChange.inProgress {
+	if n.viewChange.inProgress || n.isPrimary() {
 		return
 	}
 	// A backup accepts a pre-prepare message provided:
@@ -363,12 +364,13 @@ func (n *PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
 	matchingSlot := n.ensureMapping(preprepareMessage.Number)
 	if matchingSlot.preprepare != nil {
 		//TODO: Only throw here if digest is different
-		n.Error("Received more than one pre-prepare for slot id %+v", preprepareMessage.Number)
+		// n.Error("Received more than one pre-prepare for slot id %+v", preprepareMessage.Number)
 		return
 	}
 	matchingSlot.request = &preprepare.Request
 	matchingSlot.preprepare = preprepare
 	n.log[preprepareMessage.Number] = matchingSlot
+	// TODO: handlePrepare here (accept prepare for self)
 	go n.broadcast("PBFTNode.Prepare", &prepare, 0)
 }
 
@@ -376,38 +378,33 @@ func (n *PBFTNode) handlePrepare(message *Prepare) {
 	if n.viewChange.inProgress {
 		return
 	}
-	if n.down {
-		return
-	}
 	// If we've already committed this message... don't bother
-	if message.Number.BeforeOrEqual(SlotId{
-		ViewNumber: n.viewNumber, SeqNumber: n.sequenceNumber}) {
-		return
-	}
+	// if message.Number.BeforeOrEqual(SlotId{
+	// 	ViewNumber: n.viewNumber, SeqNumber: n.sequenceNumber}) {
+	// 	return
+	// }
 	// TODO: validate prepare message
 	slot := n.ensureMapping(message.Number)
 	//TODO: check that the prepare matches the pre-prepare message if it exists
 	slot.prepares[message.Node] = *message
-	nowPrepared := !slot.prepared && n.isPrepared(slot)
-	if nowPrepared {
+	prepared := n.isPrepared(slot)
+	if prepared {
 		slot.prepared = true
 	}
 	n.log[message.Number] = slot
-	if nowPrepared {
+	if slot.prepared {
 		n.Log("PREPARED %+v", message.Number)
 		commit := Commit{
 			Number:  message.Number,
 			Message: message.Message,
 			Node:    n.id,
 		}
+		// TODO: handleCommit here (accept commit for self)
 		go n.broadcast("PBFTNode.Commit", &commit, 0)
 	}
 }
 
 func (n *PBFTNode) handleCommit(message *Commit) {
-	if n.down {
-		return
-	}
 	if n.viewChange.inProgress {
 		return
 	}
@@ -422,6 +419,7 @@ func (n *PBFTNode) handleCommit(message *Commit) {
 	slot.commits[message.Node] = message
 	nowCommitted := !slot.committed && n.isCommitted(slot)
 	if nowCommitted {
+		n.Log("COMMITTED %+v", message.Number)
 		slot.committed = true
 		info := n.requests[message.Message.Id] //.committed = true
 		n.requests[message.Message.Id] = requestInfo{
@@ -523,18 +521,25 @@ func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]PrePrepare
 			//       Primary creates Pre-prepare with a no-op message.
 			request = ClientRequest{}
 		}
-		preprepares[slotId] = PrePrepareFull{
+		preprepare := PrePrepareFull{
 			PrePrepareMessage: PrePrepare{Number: slotId},
 			Request:           request,
 		}
+		preprepares[slotId] = preprepare
+		n.log[slotId] = Slot{
+			request:    &request,
+			preprepare: &preprepare,
+			prepares:   make(map[NodeId]Prepare),
+			commits:    make(map[NodeId]*Commit),
+			prepared:   false,
+			committed:  false,
+		}
 	}
+	n.issuedSequenceNumber = maxS
 	return preprepares
 }
 
 func (n *PBFTNode) handleViewChange(message *ViewChange) {
-	if n.down {
-		return
-	}
 	// Paper: section 4.5.2
 	// if a replica receives a set of f+1 valid view change messages
 	// from other replicas for views higher than its current view,
@@ -594,7 +599,7 @@ func (n *PBFTNode) handleViewChange(message *ViewChange) {
 			n.newView = &newview
 			n.caughtUpMux.Lock()
 			for p, _ := range n.peermap {
-				n.caughtUp[p] = false
+				n.caughtUp[p] = 0
 			}
 			n.caughtUpMux.Unlock()
 			n.enterNewView(message.ViewNumber)
@@ -604,9 +609,6 @@ func (n *PBFTNode) handleViewChange(message *ViewChange) {
 }
 
 func (n *PBFTNode) handleNewView(message *NewView) {
-	if n.down {
-		return
-	}
 	// Paper: section 4.4
 	// A backup accepts a new-view message for view v+1 if it is signed
 	// properly, if the view-change messages it contains are valid for view v+1,
@@ -616,6 +618,9 @@ func (n *PBFTNode) handleNewView(message *NewView) {
 	if n.viewChange.inProgress {
 		if message.ViewNumber == n.viewChange.viewNumber {
 			n.enterNewView(message.ViewNumber)
+			for _, preprepare := range message.PrePrepares {
+				n.handlePrePrepare(&preprepare)
+			}
 			return
 		}
 		currentView = n.viewChange.viewNumber
@@ -624,7 +629,12 @@ func (n *PBFTNode) handleNewView(message *NewView) {
 	}
 	// TODO: validate everything
 	if message.ViewNumber > currentView {
+		// Multicast prepares for each message in O
+		// and enter view + 1
 		n.enterNewView(message.ViewNumber)
+		for _, preprepare := range message.PrePrepares {
+			n.handlePrePrepare(&preprepare)
+		}
 	}
 }
 
@@ -642,7 +652,10 @@ func (n *PBFTNode) getTimeout() time.Duration {
 }
 
 func (n *PBFTNode) handleHeartbeatTimeout() {
-	if n.down || n.viewChange.inProgress {
+	if n.viewChange.inProgress {
+		return
+	}
+	if n.down {
 		return
 	}
 	if !n.isPrimary() {
@@ -652,11 +665,18 @@ func (n *PBFTNode) handleHeartbeatTimeout() {
 	}
 }
 
-func heartbeatMessage() PrePrepareFull {
-	return PrePrepareFull{
-		PrePrepareMessage: PrePrepare{},
-		Request:           ClientRequest{},
+func (n *PBFTNode) heartbeatMessage(peerSequence int) PrePrepareFull {
+	if n.sequenceNumber == peerSequence {
+		return PrePrepareFull{
+			PrePrepareMessage: PrePrepare{},
+			Request:           ClientRequest{},
+		}
 	}
+	slot := SlotId{
+		ViewNumber: n.viewNumber,
+		SeqNumber:  peerSequence + 1,
+	}
+	return *(n.log[slot].preprepare)
 }
 
 // TODO (sydli): Clean up the below. It's gross.
@@ -667,26 +687,36 @@ func (n *PBFTNode) sendHeartbeat() {
 	for id, hostname := range n.peermap {
 		var rpcType string
 		var msg interface{}
-		var after func(NodeId, error)
+		var after func(NodeId, PPResponse, error)
+		// TOCTOU isn't too dangerous here since
+		// it just means we send an unnecessary preprepare
+		// that the peer has already received before
 		n.caughtUpMux.RLock()
 		caughtUp := n.caughtUp[id]
 		n.caughtUpMux.RUnlock()
-		if !caughtUp {
+		if caughtUp == 0 {
 			rpcType = "PBFTNode.NewView"
 			msg = n.newView
-			after = func(id NodeId, err error) {
+			after = func(id NodeId, response PPResponse, err error) {
 				n.caughtUpMux.Lock()
-				n.caughtUp[id] = err == nil
+				n.caughtUp[id] = 1
 				n.caughtUpMux.Unlock()
 			}
 		} else {
 			rpcType = "PBFTNode.PrePrepare"
-			msg = heartbeatMessage()
-			after = func(id NodeId, err error) {}
+			msg = n.heartbeatMessage(caughtUp)
+			after = func(id NodeId, response PPResponse, err error) {
+				if err == nil {
+					n.caughtUpMux.Lock()
+					n.caughtUp[id] = response.SeqNumber
+					n.caughtUpMux.Unlock()
+				}
+			}
 		}
-		go func(id NodeId, hostname string, rpcType string, msg interface{}, after func(NodeId, error)) {
-			err := sendRpc(n.id, id, hostname, rpcType, n.cluster.Endpoint, msg, nil, 1, time.Duration(100*time.Millisecond))
-			after(id, err)
+		go func(id NodeId, hostname string, rpcType string, msg interface{}, after func(NodeId, PPResponse, error)) {
+			resp := PPResponse{}
+			err := sendRpc(n.id, id, hostname, rpcType, n.cluster.Endpoint, msg, &resp, 1, time.Duration(100*time.Millisecond))
+			after(id, resp, err)
 		}(id, hostname, rpcType, msg, after)
 	}
 }
@@ -740,7 +770,12 @@ func (n *PBFTNode) generateProofsSinceCheckpoint() map[SlotId]PreparedProof {
 // It stops accepting messages (other than checkpoint,
 // view-change, and new-view) and multicasts a view-change
 // to all other replicas.
+// TODO (sydli): retransmit view change messages
 func (n *PBFTNode) startViewChange(view int) {
+	if n.down {
+		return
+	}
+
 	if n.viewChange.viewNumber > view || n.viewChange.inProgress && n.viewChange.viewNumber == view {
 		return
 	}
@@ -754,7 +789,8 @@ func (n *PBFTNode) startViewChange(view int) {
 		Proofs:          n.generateProofsSinceCheckpoint(),
 		Node:            n.id,
 	}
-	// TODO (sydli): instead of stopping this timer, use it for exponential backoff
+	// TODO (sydli): instead of stopping this timer, use it for exponential backoff && to
+	// re-transmit
 	n.stopTimers()
 	go broadcast(n.id, n.peermap, "PBFTNode.ViewChange", n.cluster.Endpoint, &message, time.Duration(100*time.Millisecond))
 }
@@ -763,6 +799,7 @@ func (n *PBFTNode) enterNewView(view int) {
 	n.Log("ENTER NEW VIEW FOR VIEW %d", view)
 	n.viewChange.inProgress = false
 	n.viewNumber = view
+	n.sequenceNumber = 0
 	n.startTimers()
 }
 
@@ -798,11 +835,12 @@ func (n PBFTNode) ClientRequest(req *ClientRequest, res *Ack) error {
 	return nil
 }
 
-func (n PBFTNode) PrePrepare(req *PrePrepareFull, res *Ack) error {
+func (n PBFTNode) PrePrepare(req *PrePrepareFull, res *PPResponse) error {
 	if n.down {
 		return errors.New("I'm down")
 	}
 	n.preprepareChannel <- req
+	res.SeqNumber = n.sequenceNumber
 	return nil
 }
 

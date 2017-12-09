@@ -45,6 +45,11 @@ type PrePrepare struct {
 	Number SlotId
 }
 
+// hehehe peepee
+type PPResponse struct {
+	SeqNumber int
+}
+
 type PrePrepareFull struct {
 	PrePrepareMessage PrePrepare
 	Request           ClientRequest
