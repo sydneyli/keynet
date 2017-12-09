@@ -3,10 +3,10 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"distributepki/clientapi"
-	"distributepki/keystore"
+	//"distributepki/clientapi"
+	//"distributepki/keystore"
 	"distributepki/util"
-	"encoding/gob"
+	//"encoding/gob"
 	"errors"
 	"fmt"
 	"io/ioutil"

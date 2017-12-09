@@ -204,7 +204,7 @@ func (n PBFTNode) Error(format string, args ...interface{}) {
 func (n *PBFTNode) ensureMapping(num SlotId) *Slot {
 	slot, ok := n.log[num]
 	if !ok {
-		slot = Slot{
+		slot = &Slot{
 			request:       nil,
 			requestDigest: [sha256.Size]byte{},
 			preprepare:    nil,
@@ -305,7 +305,6 @@ func (n *PBFTNode) handleClientRequest(request *string) {
 			return
 		}
 		n.issuedSequenceNumber = n.issuedSequenceNumber + 1
-		n.Log("ISSUED SEQNUM %d for %d", n.issuedSequenceNumber, request.Id)
 		id := SlotId{
 			ViewNumber: n.viewNumber,
 			SeqNumber:  n.issuedSequenceNumber,
@@ -319,7 +318,8 @@ func (n *PBFTNode) handleClientRequest(request *string) {
 			},
 			Request: *request,
 		}
-		n.log[id] = Slot{
+		fullMessage.PrePrepareMessage.SetDigest()
+		n.log[id] = &Slot{
 			request:       request,
 			requestDigest: requestDigest,
 			preprepare:    &fullMessage.PrePrepareMessage,
@@ -370,6 +370,7 @@ func (n *PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
 	//     1. only the leader of the specified view can send preprepares
 	n.timeoutTimer.Reset(n.getTimeout())
 
+	// n.Log("PP1: %+v ", preprepare)
 	preprepareMessage := preprepare.PrePrepareMessage
 	if preprepareMessage == (PrePrepare{}) {
 		//NO-OP heartbeat... don't bother processing
@@ -420,9 +421,9 @@ func (n *PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
 	}
 	prepare.SetDigest()
 
-	slot.prepares[n.id] = &prepare
-	log[preprepareMessage.Number].preprepare = preprepare.PrePrepareMessage
-	go n.broadcast("PBFTNode.Prepare", &prepare, 0)
+	slot.prepares[n.id] = prepare
+	n.log[preprepareMessage.Number].preprepare = &preprepare.PrePrepareMessage
+	go n.broadcast("PBFTNode.Prepare", prepare, 0)
 }
 
 func (n *PBFTNode) handlePrepare(message *Prepare) {
@@ -439,10 +440,10 @@ func (n *PBFTNode) handlePrepare(message *Prepare) {
 	if slot.request != nil && slot.requestDigest != message.RequestDigest {
 		plog.Errorf("Received prepare for slot id %+v with mismatched digest.", message.Number)
 	}
-	slot.prepares[message.Node] = message
+	slot.prepares[message.Node] = *message
 
 	n.log[message.Number] = slot
-	if !slot.prepared && n.isPrepared(slot) {
+	if n.isPrepared(slot) {
 		n.Log("PREPARED %+v", message.Number)
 		slot.prepared = true
 
@@ -473,8 +474,8 @@ func (n *PBFTNode) handleCommit(message *Commit) {
 		plog.Errorf("Received commit for slot id %+v with mismatched digest.", message.Number)
 	}
 	slot.commits[message.Node] = message
-
-	if !slot.committed && n.isCommitted(slot) {
+	nowCommitted := !slot.committed && n.isCommitted(slot)
+	if nowCommitted {
 		n.Log("COMMITTED %+v", message.Number)
 		slot.committed = true
 		// info := n.requests[message.Message.Id] //.committed = true
@@ -499,8 +500,9 @@ func (n *PBFTNode) handleCommit(message *Commit) {
 }
 
 type requestView struct {
-	request ClientRequest
-	view    int
+	request       string
+	requestDigest [sha256.Size]byte
+	view          int
 }
 
 // Section 4.4 in paper
@@ -539,8 +541,9 @@ func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]PrePrepare
 			//     for all the sequence numbers (we choose the ones with
 			//     the highest view numbers), for part (2).
 			reqInfo := requestView{
-				view:    num.ViewNumber,
-				request: prepareproof.Preprepare.Request,
+				view:          num.ViewNumber,
+				requestDigest: prepareproof.RequestDigest,
+				request:       prepareproof.Request,
 			}
 			if prevReqInfo, ok := seqNums[num.SeqNumber]; ok {
 				// if it exists, only replace if this one has a higher viewnum
@@ -566,7 +569,12 @@ func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]PrePrepare
 				ViewNumber: view,
 				SeqNumber:  s,
 			}
-			var request ClientRequest
+			var request string
+			var requestDigest [sha256.Size]byte
+			emptyRequestDigest, err := util.GenerateDigest("")
+			if err != nil {
+				n.Error(" OH SHIT DIGEST EMPTY??? ")
+			}
 			//    There are two cases:
 			if reqInfo, ok := seqNums[s]; ok {
 				//    1. There is at least one set in the P component of some
@@ -575,23 +583,32 @@ func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]PrePrepare
 				//       in the pre-prepare message for n with the highest
 				//       view number in V.
 				request = reqInfo.request
+				requestDigest = reqInfo.requestDigest
 			} else {
 				//    2. There is no such set.
 				//       Primary creates Pre-prepare with a no-op message.
-				request = ClientRequest{}
+				request = ""
+				requestDigest = emptyRequestDigest
+
 			}
 			preprepare := PrePrepareFull{
-				PrePrepareMessage: PrePrepare{Number: slotId},
-				Request:           request,
+				PrePrepareMessage: PrePrepare{
+					Number:        slotId,
+					RequestDigest: requestDigest,
+					Digest:        [sha256.Size]byte{},
+				},
+				Request: request,
 			}
+			preprepare.PrePrepareMessage.SetDigest()
 			preprepares[slotId] = preprepare
-			n.log[slotId] = Slot{
-				request:    &request,
-				preprepare: &preprepare,
-				prepares:   make(map[NodeId]Prepare),
-				commits:    make(map[NodeId]*Commit),
-				prepared:   false,
-				committed:  false,
+			n.log[slotId] = &Slot{
+				request:       &request,
+				requestDigest: requestDigest,
+				preprepare:    &preprepare.PrePrepareMessage,
+				prepares:      make(map[NodeId]Prepare),
+				commits:       make(map[NodeId]*Commit),
+				prepared:      false,
+				committed:     false,
 			}
 		}
 	}
@@ -736,7 +753,10 @@ func (n *PBFTNode) heartbeatMessage(peerSequence int) PrePrepareFull {
 		ViewNumber: n.viewNumber,
 		SeqNumber:  peerSequence + 1,
 	}
-	return *(n.log[slot].preprepare)
+	return PrePrepareFull{
+		PrePrepareMessage: *n.log[slot].preprepare,
+		Request:           *n.log[slot].request,
+	}
 }
 
 // TODO (sydli): Clean up the below. It's gross.
@@ -817,9 +837,11 @@ func (n *PBFTNode) generateProofsSinceCheckpoint() map[SlotId]PreparedProof {
 	for id, slot := range n.log {
 		if n.lastCheckpoint.Before(id) && n.isPrepared(slot) {
 			proofs[id] = PreparedProof{
-				Number:     id,
-				Preprepare: *slot.preprepare,
-				Prepares:   slot.prepares,
+				Number:        id,
+				Request:       *slot.request,
+				RequestDigest: slot.requestDigest,
+				Preprepare:    *slot.preprepare,
+				Prepares:      slot.prepares,
 			}
 		}
 	}

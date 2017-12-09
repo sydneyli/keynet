@@ -67,21 +67,6 @@ func testPutHelper(t *testing.T, cluster *pbft.ClusterConfig, putAt int, getAt i
 	return alias, key
 }
 
-func TestNormalOperation(t *testing.T) {
-	shutdownSignal := make(chan bool)
-	cluster := LoadConfig("cluster.json")
-	go func(cluster *pbft.ClusterConfig, shutdownSignal chan bool) {
-		<-time.After(time.Second)
-		defer func() { shutdownSignal <- true }()
-		// assuming node 1 is leader...
-		testPutHelper(t, cluster, 1, 1)
-		testPutHelper(t, cluster, 1, 4)
-		testPutHelper(t, cluster, 3, 4)
-		testPutHelper(t, cluster, 4, 1)
-	}(&cluster, shutdownSignal)
-	startCluster(&cluster, shutdownSignal)
-}
-
 func sendDebugMessageToNode(cluster *pbft.ClusterConfig, nodeId int, message pbft.DebugMessage) {
 	node := getNode(cluster, nodeId)
 	err := util.SendRpc(
@@ -96,6 +81,21 @@ func sendDebugMessageToNode(cluster *pbft.ClusterConfig, nodeId int, message pbf
 	if err != nil {
 		log.Fatal(err)
 	}
+}
+
+func TestNormalOperation(t *testing.T) {
+	shutdownSignal := make(chan bool)
+	cluster := LoadConfig("cluster.json")
+	go func(cluster *pbft.ClusterConfig, shutdownSignal chan bool) {
+		<-time.After(time.Second)
+		defer func() { shutdownSignal <- true }()
+		// assuming node 1 is leader...
+		testPutHelper(t, cluster, 1, 1)
+		testPutHelper(t, cluster, 1, 4)
+		testPutHelper(t, cluster, 3, 4)
+		testPutHelper(t, cluster, 4, 1)
+	}(&cluster, shutdownSignal)
+	startCluster(&cluster, shutdownSignal)
 }
 
 func TestViewChangeAfterCommit(t *testing.T) {
@@ -115,16 +115,47 @@ func TestViewChangeAfterCommit(t *testing.T) {
 	startCluster(&cluster, shutdownSignal)
 }
 
-func TestSingleViewChange(t *testing.T) {
+func TestCommitDuringViewChange(t *testing.T) {
+	shutdownSignal := make(chan bool)
+	cluster := LoadConfig("cluster.json")
+	go func(cluster *pbft.ClusterConfig, shutdownSignal chan bool) {
+		<-time.After(time.Second)
+		defer func() { shutdownSignal <- true }()
+		// 1. Take down leader and wait for view change
+		sendDebugMessageToNode(cluster, 1, pbft.DebugMessage{Op: pbft.DOWN})
+		<-time.After(6 * time.Second)
+		// 2. Try to persist update
+		alias, key := testPutHelper(t, cluster, 3, 4)
+		// XXX - below is broken
+		// // 3. Bring node back up
+		// sendDebugMessageToNode(cluster, 1, pbft.DebugMessage{Op: pbft.UP})
+		// <-time.After(1 * time.Second)
+		// // 4. Did the node catch up properly?
+		// status, result := doGet(cluster, getNode(cluster, 1), alias)
+		// assertEqual(t, status, "200 OK", "")
+		// assertEqual(t, result, fmt.Sprintf("\"%s\"", key), "")
+	}(&cluster, shutdownSignal)
+	startCluster(&cluster, shutdownSignal)
+}
+
+func TestBackupCatchesUp(t *testing.T) {
 	shutdownSignal := make(chan bool)
 	cluster := LoadConfig("cluster.json")
 	go func(cluster *pbft.ClusterConfig, shutdownSignal chan bool) {
 		<-time.After(time.Second)
 		defer func() { shutdownSignal <- true }()
 		// assuming node 1 is leader...
-		sendDebugMessageToNode(cluster, 1, pbft.DebugMessage{Op: pbft.DOWN})
-		<-time.After(6 * time.Second)
-		testPutHelper(t, cluster, 3, 4)
+		// 1. Take down a backup node.
+		sendDebugMessageToNode(cluster, 3, pbft.DebugMessage{Op: pbft.DOWN})
+		// 2. Commit a value without them.
+		alias, key := testPutHelper(t, cluster, 3, 4)
+		// 3. Bring node back.
+		sendDebugMessageToNode(cluster, 3, pbft.DebugMessage{Op: pbft.UP})
+		<-time.After(time.Second)
+		// 4. Do they catch up?
+		status, result := doGet(cluster, getNode(cluster, 3), alias)
+		assertEqual(t, status, "200 OK", "")
+		assertEqual(t, result, fmt.Sprintf("\"%s\"", key), "")
 	}(&cluster, shutdownSignal)
 	startCluster(&cluster, shutdownSignal)
 }

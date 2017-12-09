@@ -72,9 +72,11 @@ type Checkpoint struct {
 }
 
 type PreparedProof struct {
-	Number     SlotId
-	Preprepare PrePrepareFull
-	Prepares   map[NodeId]Prepare
+	Number        SlotId
+	Preprepare    PrePrepare
+	Request       string
+	RequestDigest [sha256.Size]byte
+	Prepares      map[NodeId]Prepare
 }
 
 // TODO: include all proofs/verification stuff
