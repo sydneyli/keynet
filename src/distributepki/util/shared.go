@@ -1,10 +1,17 @@
 package util
 
 import (
+	"github.com/coreos/pkg/capnslog"
+
 	"crypto/sha256"
+	"errors"
 	"net/rpc"
 	"strconv"
 	"time"
+)
+
+var (
+	plog = capnslog.NewPackageLogger("github.com/sydli/distributePKI", "pbft")
 )
 
 func GetHostname(host string, port int) string {
@@ -13,7 +20,7 @@ func GetHostname(host string, port int) string {
 
 func SendRpc(hostName string, endpoint string, rpcFunction string, message interface{}, response interface{}, rpcRetries int, timeout time.Duration) error {
 	if timeout <= 0 {
-		timeout = 100 * time.Millisecond
+		timeout = 1000 * time.Millisecond
 	}
 	rpcClient, err := rpc.DialHTTPPath("tcp", hostName, endpoint)
 	for nRetries := 0; err != nil && rpcRetries < nRetries; nRetries++ {
@@ -23,13 +30,14 @@ func SendRpc(hostName string, endpoint string, rpcFunction string, message inter
 		return err
 	}
 	remoteCall := rpcClient.Go(rpcFunction, message, response, nil)
+	defer rpcClient.Close()
 	select {
 	case result := <-remoteCall.Done:
 		if result.Error != nil {
 			return result.Error
 		}
 	case <-time.After(timeout):
-		rpcClient.Close()
+		return errors.New("Timed out")
 	}
 	return nil
 
