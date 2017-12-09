@@ -108,13 +108,12 @@ Depending on the current status of the project, that may not work.
  - [X] Catch up nodes properly (piggybacking entries on heartbeats
        and re-preparing non-checkpointed entries)
  - [X] View changes on client request timeout & on heartbeat timeout
- - [ ] *Checkpointing* (JL)
-    * limit sequence nums properly
+ - [X] Checkpointing (sydli)
 
 ### not core, but also important
- - [ ] Check for resource leaks
+ - [ ] *Check for resource leaks* (sydli)
  - [X] tests?? l0l
- - [X] moar tests
+ - [ ] moar tests
  - [ ] Reuse RPC connections
 
 # Implementation details

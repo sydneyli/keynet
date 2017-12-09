@@ -1,6 +1,7 @@
 package keystore
 
 import (
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
@@ -44,14 +45,15 @@ func (e SignatureMismatch) Error() string {
 }
 
 type Keystore struct {
-	keys *sync.Map
+	keys *map[Alias]Key
+	mux  sync.RWMutex
 }
 
 func NewKeystore(initial *map[string]string) *Keystore {
-	syncMap := sync.Map{}
+	syncMap := make(map[Alias]Key)
 	for k, v := range *initial {
 		// TODO: figure out a better way to do this
-		syncMap.Store(k, v)
+		syncMap[Alias(k)] = Key(v)
 	}
 	return &Keystore{keys: &syncMap}
 }
@@ -66,7 +68,9 @@ func (ks *Keystore) CreateKey(alias Alias, key Key) error {
 		ks.store.Propose("Create", clientMessage)
 	*/
 	plog.Infof("Store key %v for alias %v", key, alias)
-	ks.keys.Store(alias, key)
+	ks.mux.Lock()
+	defer ks.mux.Unlock()
+	(*ks.keys)[alias] = key
 	return nil
 }
 
@@ -86,7 +90,9 @@ func (ks *Keystore) UpdateKey(alias Alias, update KeyUpdate) error {
 		plog.Infof("Update Alias: %v set Key: %v ", alias, update.key)
 		ks.store.Propose("Update", clientMessage)
 	*/
-	ks.keys.Store(alias, update.key)
+	ks.mux.Lock()
+	defer ks.mux.Unlock()
+	(*ks.keys)[alias] = update.key
 	return nil
 }
 
@@ -96,8 +102,10 @@ func (ks *Keystore) LookupKey(alias Alias) (bool, Key) {
 		ks.store.Propose("Lookup", clientMessage)
 	*/
 	plog.Info("Load ", alias)
-	if key, ok := ks.keys.Load(alias); ok {
-		return true, key.(Key)
+	ks.mux.RLock()
+	defer ks.mux.RUnlock()
+	if key, ok := (*ks.keys)[alias]; ok {
+		return true, key
 	}
 	return false, Key("")
 
@@ -111,6 +119,25 @@ func (ks *Keystore) LookupKey(alias Alias) (bool, Key) {
 			return Key(""), AliasNotFoundError(alias)
 		}
 	*/
+}
+
+func (s *Keystore) GetSnapshot() ([]byte, error) {
+	// s.mu.Lock()
+	// defer s.mu.Unlock()
+	return json.Marshal(*s.keys)
+}
+
+func (ks *Keystore) ApplySnapshot(snapshot *[]byte) error {
+	// s.mu.Lock()
+	// defer s.mu.Unlock()
+	ks.mux.Lock()
+	defer ks.mux.Unlock()
+	var keys map[Alias]Key
+	if err := json.Unmarshal(*snapshot, &keys); err != nil {
+		return err
+	}
+	ks.keys = &keys
+	return nil
 }
 
 func verifyKeyUpdate(update KeyUpdate, oldKey Key) bool {

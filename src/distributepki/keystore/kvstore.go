@@ -99,17 +99,13 @@ func (s *Kvstore) readCommits(node *pbft.PBFTNode) {
 	// }
 }
 
-func (s *Kvstore) MakeCheckpoint() (interface{}, error) {
-	return s.getSnapshot()
-}
-
-func (s *Kvstore) getSnapshot() ([]byte, error) {
+func (s *Kvstore) GetSnapshot() ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return json.Marshal(s.kvStore)
 }
 
-func (s *Kvstore) recoverFromSnapshot(snapshot []byte) error {
+func (s *Kvstore) ApplySnapshot(snapshot []byte) error {
 	var store map[string]string
 	if err := json.Unmarshal(snapshot, &store); err != nil {
 		return err

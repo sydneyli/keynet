@@ -67,8 +67,16 @@ type Commit struct {
 // checkpoint
 // (signed by node i)
 type Checkpoint struct {
-	Number SlotId
-	Node   NodeId
+	Number   SlotId
+	Snapshot []byte
+	Node     NodeId
+	// TODO: also needs a digest i think
+}
+
+type CheckpointProof struct {
+	Number   SlotId
+	Snapshot []byte
+	Proof    map[NodeId]Checkpoint
 }
 
 type PreparedProof struct {
@@ -79,7 +87,6 @@ type PreparedProof struct {
 	Prepares      map[NodeId]Prepare
 }
 
-// TODO: include all proofs/verification stuff
 // VIEW CHANGE:
 // n: last checkpoint sequence num
 // C: Proof of checkpoint at n

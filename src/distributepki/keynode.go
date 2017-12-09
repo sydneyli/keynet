@@ -140,12 +140,63 @@ func SpawnKeyNode(config pbft.NodeConfig, cluster *pbft.ClusterConfig, store *ke
 
 func (kn *KeyNode) handleUpdates() {
 	for {
-		commit := <-kn.consensusNode.Committed()
-		kn.handleCommit(commit)
+		select {
+		case commit := <-kn.consensusNode.Committed():
+			kn.handleCommit(commit)
+		case request := <-kn.consensusNode.SnapshotRequested():
+			kn.handleSnapshotRequest(request)
+		case snapshot := <-kn.consensusNode.Snapshotted():
+			kn.handleSnapshot(snapshot)
+		}
 	}
 }
 
+func (kn *KeyNode) handleSnapshotRequest(slot pbft.SlotId) {
+	snapshot, err := kn.store.GetSnapshot()
+	if err != nil {
+		plog.Errorf("oh no, couldnt snapshot")
+	}
+	kn.consensusNode.SnapshotReply(slot, snapshot)
+}
+
+func (kn *KeyNode) handleSnapshot(snapshot *[]byte) {
+	kn.store.ApplySnapshot(snapshot)
+	// var keyOp clientapi.KeyOperation
+	// err := gob.NewDecoder(bytes.NewReader([]byte(*operation))).Decode(&keyOp)
+	// if err != nil {
+	// 	plog.Error(err)
+	// 	return
+	// }
+
+	// plog.Infof("Commit operation: %+v", keyOp)
+
+	// // XXX: do we need to check the signature of the operation again here?
+	// // Or do we assume that since it's committed and we're a non-faulty
+	// // node, we can apply it.
+	// switch keyOp.OpCode {
+	// case clientapi.OP_CREATE:
+	// 	create, ok := keyOp.Op.(clientapi.Create)
+	// 	if !ok {
+	// 		plog.Error("Operation not a Create (handleCommit)")
+	// 		return
+	// 	}
+	// 	plog.Infof("Commit create to keystore: %v", create)
+	// 	kn.store.CreateKey(create.Alias, create.Key)
+	// case clientapi.OP_UPDATE:
+	// 	update, ok := keyOp.Op.(clientapi.Update)
+	// 	if !ok {
+	// 		plog.Error("Operation not a Update (handleCommit)")
+	// 		return
+	// 	}
+	// 	plog.Infof("Commit update to keystore: %v", update)
+	// 	// TODO: Update keystore
+	// }
+}
+
 func (kn *KeyNode) handleCommit(operation *string) {
+	if operation == nil {
+		return
+	}
 
 	var keyOp clientapi.KeyOperation
 	err := gob.NewDecoder(bytes.NewReader([]byte(*operation))).Decode(&keyOp)
@@ -153,8 +204,6 @@ func (kn *KeyNode) handleCommit(operation *string) {
 		plog.Error(err)
 		return
 	}
-
-	plog.Infof("Commit operation: %+v", keyOp)
 
 	// XXX: do we need to check the signature of the operation again here?
 	// Or do we assume that since it's committed and we're a non-faulty
