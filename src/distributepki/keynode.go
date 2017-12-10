@@ -258,7 +258,6 @@ func (kn *KeyNode) handleSnapshot(snapshot *[]byte) {
 }
 
 func (kn *KeyNode) handleCommit(operation *string) {
-	kn.logger.Infof("handlecommit")
 	if operation == nil {
 		return
 	}
