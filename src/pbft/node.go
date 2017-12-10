@@ -5,9 +5,12 @@ import (
 
 	"crypto/sha256"
 	"errors"
+	"golang.org/x/crypto/openpgp"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"net/rpc"
+	"strings"
 	"sync"
 	"time"
 )
@@ -16,20 +19,23 @@ type PBFTNode struct {
 	//////
 	// Immutable config data
 	//////
-	id         NodeId
-	host       string
-	port       int
-	primary    bool
-	peermap    map[NodeId]string // id => hostname
-	hostToPeer map[string]NodeId // hostname => id
-	cluster    ClusterConfig
+	id            NodeId
+	host          string
+	port          int
+	primary       bool
+	peermap       map[NodeId]string // id => hostname
+	hostToPeer    map[string]NodeId // hostname => id
+	cluster       ClusterConfig
+	entity        *openpgp.Entity
+	peerEntityMap map[EntityFingerprint]NodeId
+	peerEntities  openpgp.EntityList
 
 	// MAIN MESSAGE CHANNELS.
 	// Main execution loop selects from these.
 	debugChannel           chan *DebugMessage
 	requestChannel         chan *string
 	recvSnapshotChannel    chan snapshot
-	preprepareChannel      chan *PrePrepareFull
+	preprepareChannel      chan *FullPrePrepare
 	prepareChannel         chan *Prepare
 	checkpointChannel      chan *Checkpoint
 	checkpointProofChannel chan *CheckpointProof
@@ -136,17 +142,52 @@ const CHECKPOINT uint = 3
 // ClusterConfig: configuration for entire cluster
 // ready channel: send item when node is up & running
 func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
-	// 1. Create id <=> peer hostname maps from list
+
+	// 1. Read PGP private key
+	hostEntityList, err := ReadPgpKeyFile(host.PrivateKeyFile)
+	if err != nil {
+		plog.Fatalf("StartNode(%d) reading private key: %s", host.Id, err.Error())
+	} else if len(hostEntityList) != 1 {
+		plog.Errorf("StartNode(%d) reading private key: expected only 1 host PGP entity, got %d", host.Id, len(hostEntityList))
+	}
+	hostEntity := hostEntityList[0]
+	plog.Infof("host primary key: %+v", hostEntity.PrimaryKey)
+
+	phrase, err := ioutil.ReadFile(host.PassPhraseFile)
+	if err != nil {
+		plog.Fatalf("StartNode(%d) reading passphrase: %s", host.Id, err.Error())
+	}
+	passphrase := strings.TrimSpace(string(phrase))
+
+	err = hostEntity.PrivateKey.Decrypt([]byte(passphrase))
+	if err != nil {
+		plog.Fatalf("StartNode(%d) decrypting private key: %s", host.Id, err.Error())
+	}
+
+	// 2. Create id <=> peer hostname maps from list, read PGP public keys
 	peermap := make(map[NodeId]string)
 	hostToPeer := make(map[string]NodeId)
-	for _, p := range cluster.Nodes {
+	peerEntityMap := make(map[EntityFingerprint]NodeId)
+	peerEntities := make(openpgp.EntityList, len(cluster.Nodes))
+	for i, p := range cluster.Nodes {
 		if p.Id != host.Id {
 			hostname := util.GetHostname(p.Host, p.Port)
 			peermap[p.Id] = hostname
 			hostToPeer[hostname] = p.Id
+
+			list, err := ReadPgpKeyFile(p.PublicKeyFile)
+			if err != nil {
+				plog.Fatalf("StartNode(%d) reading node %d public key: %s", host.Id, p.Id, err.Error())
+			} else if len(list) != 1 {
+				plog.Errorf("StartNode(%d) reading node %d public key: expected only 1 PGP entity, got %d", host.Id, p.Id, len(list))
+			}
+			peerEntityMap[list[0].PrimaryKey.Fingerprint] = p.Id
+			peerEntities[i] = list[0]
+			plog.Infof("peer %d key: %+v", p.Id, peerEntities[i].PrimaryKey)
 		}
 	}
-	// 2. Create the node
+
+	// 3. Create the node
 	node := PBFTNode{
 		id:                     host.Id,
 		host:                   host.Host,
@@ -154,6 +195,9 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		peermap:                peermap,
 		hostToPeer:             hostToPeer,
 		cluster:                cluster,
+		entity:                 hostEntity,
+		peerEntityMap:          peerEntityMap,
+		peerEntities:           peerEntities,
 		debugChannel:           make(chan *DebugMessage),
 		committedChannel:       make(chan *string),
 		requestSnapshotChannel: make(chan SlotId),
@@ -161,7 +205,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		requestChannel:         make(chan *string, 10), // some nice inherent rate limiting
 		recvSnapshotChannel:    make(chan snapshot),
 		snapshottedChannel:     make(chan *[]byte),
-		preprepareChannel:      make(chan *PrePrepareFull),
+		preprepareChannel:      make(chan *FullPrePrepare),
 		prepareChannel:         make(chan *Prepare),
 		commitChannel:          make(chan *Commit),
 		checkpointChannel:      make(chan *Checkpoint),
@@ -191,7 +235,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		node.caughtUp[p] = 1
 	}
 
-	// 3. Start RPC server
+	// 4. Start RPC server
 	server := rpc.NewServer()
 	server.Register(&node)
 	node.Log(cluster.Endpoint)
@@ -208,7 +252,8 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		node.timeoutTimer = time.NewTimer(node.getTimeout())
 	}
 	go http.Serve(listener, nil)
-	// 4. Start exec loop
+
+	// 5. Start exec loop
 	go node.handleMessages()
 	return &node
 }
@@ -343,19 +388,25 @@ func (n *PBFTNode) handleClientRequest(request *string) {
 			SeqNumber:  n.issuedSequenceNumber,
 		}
 		n.Log("Received new request - View Number: %d, Sequence Number: %d", n.viewNumber, n.issuedSequenceNumber)
-		fullMessage := PrePrepareFull{
-			PrePrepareMessage: PrePrepare{
-				Number:        id,
-				RequestDigest: requestDigest,
-				Digest:        [sha256.Size]byte{},
-			},
-			Request: *request,
+
+		message := PrePrepare{
+			Number:        id,
+			RequestDigest: requestDigest,
 		}
-		fullMessage.PrePrepareMessage.SetDigest()
+		signedMessage, err := message.Sign(n.entity)
+		if err != nil {
+			n.Log("Signing pre-prepare: " + err.Error())
+			return
+		}
+		fullMessage := FullPrePrepare{
+			SignedMessage: *signedMessage,
+			Request:       *request,
+		}
+
 		n.log[id] = &Slot{
 			request:       request,
 			requestDigest: requestDigest,
-			preprepare:    &fullMessage.PrePrepareMessage,
+			preprepare:    &fullMessage.SignedMessage,
 			prepares:      make(map[NodeId]Prepare),
 			commits:       make(map[NodeId]*Commit),
 			prepared:      false,
@@ -383,13 +434,23 @@ func (n *PBFTNode) handleClientRequest(request *string) {
 	}
 }
 
-func (n *PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
+func (n *PBFTNode) handlePrePrepare(preprepare *FullPrePrepare) {
 	if n.viewChange.inProgress || n.isPrimary() {
 		return
 	}
+
+	sendingNode, err := preprepare.SignedMessage.SignatureValid(n.peerEntities, n.peerEntityMap)
+	if err != nil {
+		n.Log("Validating PrePrepare signature: " + err.Error())
+		return
+	} else if primaryNode, _ := n.getPrimary(); sendingNode != primaryNode {
+		n.Log("Error: received PrePrepare not signed by current primary")
+		return
+	}
+
 	// reset heartbeat timer!
 	n.timeoutTimer.Reset(n.getTimeout())
-	preprepareMessage := preprepare.PrePrepareMessage
+	preprepareMessage := preprepare.SignedMessage.PrePrepareMessage
 	//NO-OP heartbeat... don't bother processing
 	if preprepareMessage == (PrePrepare{}) {
 		return
@@ -406,13 +467,9 @@ func (n *PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
 		preprepareMessage.Number.SeqNumber <= n.lastCheckpoint.Number.SeqNumber {
 		return
 	}
-	if !preprepareMessage.DigestValid() {
-		n.Log("Error: PrePrepare digest does not match data")
-		return
-	}
-
 	// 3. the signatures in the request and the pre-prepare message are
-	//    correct and d is the digest for message m
+	//    correct (message signature checked above) and d is the digest for message m
+	// TODO: (jlwatson) check request signature. most likely a call into KeyNode
 	requestDigest, err := util.GenerateDigest(preprepare.Request)
 	if err != nil {
 		n.Log(err.Error())
@@ -436,14 +493,14 @@ func (n *PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
 		return
 	}
 
-	newSeqNum := preprepare.PrePrepareMessage.Number.SeqNumber
+	newSeqNum := preprepareMessage.Number.SeqNumber
 	if newSeqNum > n.issuedSequenceNumber {
 		n.issuedSequenceNumber = newSeqNum
 	}
 
 	slot.request = &preprepare.Request
 	slot.requestDigest = preprepareMessage.RequestDigest
-	slot.preprepare = &preprepareMessage
+	slot.preprepare = &preprepare.SignedMessage
 
 	// TODO: iterate through potentially existing Prepare and Commit entries and check hashes, throw away non-matching with warning
 
@@ -456,7 +513,7 @@ func (n *PBFTNode) handlePrePrepare(preprepare *PrePrepareFull) {
 	prepare.SetDigest()
 
 	slot.prepares[n.id] = prepare
-	n.log[preprepareMessage.Number].preprepare = &preprepare.PrePrepareMessage
+	n.log[preprepareMessage.Number].preprepare = &preprepare.SignedMessage
 	go n.broadcast("PBFTNode.Prepare", prepare, 0)
 }
 
@@ -573,21 +630,28 @@ func (n *PBFTNode) handleHeartbeatTimeout() {
 // returns rpcName, message
 func (n *PBFTNode) heartbeatMessage(peerSequence int) (string, interface{}) {
 	if n.sequenceNumber == peerSequence {
-		return "PBFTNode.PrePrepare", PrePrepareFull{
-			PrePrepareMessage: PrePrepare{},
-			Request:           "",
+		pp := PrePrepare{}
+		signedMessage, err := pp.Sign(n.entity)
+		if err != nil {
+			// XXX: crash the node b/c slightly too lazy to figure out what to return here...
+			plog.Fatal("Error signing empty heartbeat PrePrepare")
+		}
+		return "PBFTNode.PrePrepare", FullPrePrepare{
+			SignedMessage: *signedMessage,
+			Request:       "",
 		}
 	}
 	if peerSequence < n.lastCheckpoint.Number.SeqNumber {
 		return "PBFTNode.CheckpointProof", n.lastCheckpoint
 	}
+
 	slot := SlotId{
 		ViewNumber: n.viewNumber,
 		SeqNumber:  peerSequence + 1,
 	}
-	return "PBFTNode.PrePrepare", PrePrepareFull{
-		PrePrepareMessage: *n.log[slot].preprepare,
-		Request:           *n.log[slot].request,
+	return "PBFTNode.PrePrepare", FullPrePrepare{
+		SignedMessage: *n.log[slot].preprepare,
+		Request:       *n.log[slot].request,
 	}
 }
 
@@ -599,7 +663,7 @@ func (n *PBFTNode) sendHeartbeat() {
 	for id, hostname := range n.peermap {
 		var rpcType string
 		var msg interface{}
-		var after func(NodeId, PPResponse, error)
+		var after func(NodeId, SignedPPResponse, error)
 		// TOCTOU isn't too dangerous here since
 		// it just means we send an unnecessary preprepare
 		// that the peer has already received before
@@ -609,7 +673,7 @@ func (n *PBFTNode) sendHeartbeat() {
 		if caughtUp == 0 {
 			rpcType = "PBFTNode.NewView"
 			msg = n.newView
-			after = func(id NodeId, response PPResponse, err error) {
+			after = func(id NodeId, response SignedPPResponse, err error) {
 				if err == nil {
 					n.caughtUpMux.Lock()
 					n.caughtUp[id] = 1
@@ -618,16 +682,23 @@ func (n *PBFTNode) sendHeartbeat() {
 			}
 		} else {
 			rpcType, msg = n.heartbeatMessage(caughtUp)
-			after = func(id NodeId, response PPResponse, err error) {
+			after = func(id NodeId, response SignedPPResponse, err error) {
 				if err == nil {
-					n.caughtUpMux.Lock()
-					n.caughtUp[id] = response.SeqNumber
-					n.caughtUpMux.Unlock()
+					respId, err := response.SignatureValid(n.peerEntities, n.peerEntityMap)
+					if err != nil {
+						n.Log("Error validating heartbeat signature: " + err.Error())
+					} else if respId != id {
+						n.Log("Error: heartbeat signed by wrong node")
+					} else {
+						n.caughtUpMux.Lock()
+						n.caughtUp[id] = response.Response.SeqNumber
+						n.caughtUpMux.Unlock()
+					}
 				}
 			}
 		}
-		go func(id NodeId, hostname string, rpcType string, msg interface{}, after func(NodeId, PPResponse, error)) {
-			resp := PPResponse{}
+		go func(id NodeId, hostname string, rpcType string, msg interface{}, after func(NodeId, SignedPPResponse, error)) {
+			resp := SignedPPResponse{}
 			err := sendRpc(n.id, id, hostname, rpcType, n.cluster.Endpoint, msg, &resp, 1, time.Duration(100*time.Millisecond))
 			after(id, resp, err)
 		}(id, hostname, rpcType, msg, after)
@@ -681,12 +752,19 @@ func (n PBFTNode) ClientRequest(req *string, res *Ack) error {
 	return nil
 }
 
-func (n PBFTNode) PrePrepare(req *PrePrepareFull, res *PPResponse) error {
+func (n PBFTNode) PrePrepare(req *FullPrePrepare, res *SignedPPResponse) error {
 	if n.down {
 		return errors.New("I'm down")
 	}
 	n.preprepareChannel <- req
-	res.SeqNumber = n.sequenceNumber
+
+	res.Response.SeqNumber = n.sequenceNumber
+	sig, err := res.Response.GetSignature(n.entity)
+	if err != nil {
+		return err
+	}
+	res.Signature = sig
+
 	return nil
 }
 

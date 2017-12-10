@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"golang.org/x/crypto/openpgp"
 )
+
+// ClientReply //
 
 func (cr *ClientReply) generateDigest() ([sha256.Size]byte, error) {
 	var buf bytes.Buffer
@@ -25,24 +28,90 @@ func (cr *ClientReply) SetDigest() {
 	}
 }
 
-func (pp *PrePrepare) generateDigest() ([sha256.Size]byte, error) {
-	var buf bytes.Buffer
+// PrePrepare //
+
+func (pp *PrePrepare) Sign(node *openpgp.Entity) (*SignedPrePrepare, error) {
+	var sig, buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(*pp); err != nil {
-		var empty [sha256.Size]byte
-		return empty, err
+		return nil, err
 	}
-	return sha256.Sum256(buf.Bytes()), nil
+
+	err := openpgp.DetachSign(&sig, node, &buf, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return &SignedPrePrepare{
+		PrePrepareMessage: *pp,
+		Signature:         sig.Bytes(),
+	}, nil
 }
 
-func (pp *PrePrepare) SetDigest() {
-	pp.Digest = [sha256.Size]byte{}
-	d, err := pp.generateDigest()
-	if err != nil {
-		plog.Fatal("Error setting PrePrepare digest")
-	} else {
-		pp.Digest = d
+func (pp *SignedPrePrepare) SignatureValid(peers openpgp.EntityList, peerMap map[EntityFingerprint]NodeId) (NodeId, error) {
+	var buf, sig bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(pp.PrePrepareMessage); err != nil {
+		return 0, err
 	}
+
+	if _, err := sig.Write(pp.Signature); err != nil {
+		return 0, err
+	}
+	signer, err := openpgp.CheckDetachedSignature(peers, &buf, &sig)
+	if err != nil {
+		return 0, err
+	}
+
+	return peerMap[signer.PrimaryKey.Fingerprint], nil
 }
+
+// Enables RPC response messages without creating a new copy of the response
+func (pp *PPResponse) GetSignature(node *openpgp.Entity) ([]byte, error) {
+	var sig, buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(*pp); err != nil {
+		var emptyResult []byte
+		return emptyResult, err
+	}
+
+	err := openpgp.DetachSign(&sig, node, &buf, nil)
+	if err != nil {
+		var emptyResult []byte
+		return emptyResult, err
+	}
+
+	return sig.Bytes(), nil
+}
+
+func (pp *PPResponse) Sign(node *openpgp.Entity) (*SignedPPResponse, error) {
+	sig, err := pp.GetSignature(node)
+	if err != nil {
+		return nil, err
+	}
+
+	return &SignedPPResponse{
+		Response:  *pp,
+		Signature: sig,
+	}, nil
+}
+
+func (pp *SignedPPResponse) SignatureValid(peers openpgp.EntityList, peerMap map[EntityFingerprint]NodeId) (NodeId, error) {
+	var buf, sig bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(pp.Response); err != nil {
+		return 0, err
+	}
+
+	if _, err := sig.Write(pp.Signature); err != nil {
+		return 0, err
+	}
+	plog.Infof("%+v", peers)
+	signer, err := openpgp.CheckDetachedSignature(peers, &buf, &sig)
+	if err != nil {
+		return 0, err
+	}
+
+	return peerMap[signer.PrimaryKey.Fingerprint], nil
+}
+
+// Prepare //
 
 func (p *Prepare) generateDigest() ([sha256.Size]byte, error) {
 	var buf bytes.Buffer
@@ -129,20 +198,6 @@ func (cr *ClientReply) DigestValid() bool {
 		return false
 	} else {
 		cr.digest = currentDigest
-		return d == currentDigest
-	}
-}
-
-func (pp *PrePrepare) DigestValid() bool {
-	currentDigest := pp.Digest
-	pp.Digest = [sha256.Size]byte{}
-
-	d, err := pp.generateDigest()
-	if err != nil {
-		plog.Fatal("Error calculating PrePrepare digest for validity")
-		return false
-	} else {
-		pp.Digest = currentDigest
 		return d == currentDigest
 	}
 }

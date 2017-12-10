@@ -24,7 +24,16 @@ type ClientReply struct {
 type PrePrepare struct {
 	Number        SlotId
 	RequestDigest [sha256.Size]byte
-	Digest        [sha256.Size]byte
+}
+
+type SignedPrePrepare struct {
+	PrePrepareMessage PrePrepare
+	Signature         []byte
+}
+
+type FullPrePrepare struct {
+	SignedMessage SignedPrePrepare
+	Request       string
 }
 
 // hehehe peepee
@@ -32,9 +41,9 @@ type PPResponse struct {
 	SeqNumber int
 }
 
-type PrePrepareFull struct {
-	PrePrepareMessage PrePrepare
-	Request           string
+type SignedPPResponse struct {
+	Response  PPResponse
+	Signature []byte
 }
 
 // PREPARE:
@@ -81,7 +90,7 @@ type CheckpointProof struct {
 
 type PreparedProof struct {
 	Number        SlotId
-	Preprepare    PrePrepare
+	Preprepare    SignedPrePrepare
 	Request       string
 	RequestDigest [sha256.Size]byte
 	Prepares      map[NodeId]Prepare
@@ -114,7 +123,7 @@ func (v ViewChange) verify() bool {
 type NewView struct {
 	ViewNumber  int                       // v + 1
 	ViewChanges map[NodeId]ViewChange     // V
-	PrePrepares map[SlotId]PrePrepareFull // O
+	PrePrepares map[SlotId]FullPrePrepare // O
 	Node        NodeId                    // i
 	Digest      [sha256.Size]byte
 }

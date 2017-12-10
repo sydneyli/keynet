@@ -1,6 +1,7 @@
 [
-    {
-        "alias": "localhost:30003",
-        "key": "f870aac7cbfb19d50571247c8155b02bca6de48ff3828507250d474eaf1cc062"
-    }
+    "public/node1.pub",
+    "public/node2.pub",
+    "public/node3.pub",
+    "public/node4.pub",
+    "public/node5.pub"
 ]

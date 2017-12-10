@@ -5,6 +5,8 @@ import (
 
 	"crypto/sha256"
 	"encoding/binary"
+	"golang.org/x/crypto/openpgp"
+	"os"
 )
 
 var (
@@ -12,10 +14,11 @@ var (
 )
 
 type NodeId uint
+type EntityFingerprint [20]byte
 
 type ClusterConfig struct {
-	Nodes    []NodeConfig
 	Endpoint string
+	Nodes    []NodeConfig
 }
 
 func hash(data []byte) uint32 {
@@ -31,16 +34,18 @@ func (c ClusterConfig) LeaderFor(viewNumber int) NodeId {
 }
 
 type NodeConfig struct {
-	Id         NodeId
-	Host       string
-	Port       int
-	ClientPort int
-	Key        string
+	ClientPort     int
+	Host           string
+	Id             NodeId
+	Port           int
+	PrivateKeyFile string
+	PublicKeyFile  string
+	PassPhraseFile string
 }
 
 type EndpointConfig struct {
-	Endpoint      string
 	DebugEndpoint string
+	Endpoint      string
 }
 
 type KeyPair struct {
@@ -56,7 +61,7 @@ type SlotId struct {
 type Slot struct {
 	request       *string
 	requestDigest [sha256.Size]byte
-	preprepare    *PrePrepare
+	preprepare    *SignedPrePrepare
 	prepares      map[NodeId]Prepare
 	commits       map[NodeId]*Commit
 	prepared      bool
@@ -75,4 +80,19 @@ func (slot SlotId) BeforeOrEqual(other SlotId) bool {
 		return slot.SeqNumber <= other.SeqNumber
 	}
 	return slot.ViewNumber <= other.ViewNumber
+}
+
+func ReadPgpKeyFile(path string) (openpgp.EntityList, error) {
+	keyfile, e := os.Open(path)
+	if e != nil {
+		var empty openpgp.EntityList
+		return empty, e
+	}
+
+	list, readErr := openpgp.ReadArmoredKeyRing(keyfile)
+	if readErr != nil {
+		var empty openpgp.EntityList
+		return empty, readErr
+	}
+	return list, nil
 }

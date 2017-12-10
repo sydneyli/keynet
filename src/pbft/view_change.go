@@ -89,7 +89,7 @@ func (n *PBFTNode) handleNewView(message *NewView) {
 		if message.ViewNumber == n.viewChange.viewNumber {
 			n.enterNewView(message.ViewNumber)
 			for _, preprepare := range message.PrePrepares {
-				if preprepare.PrePrepareMessage.Number.SeqNumber > n.sequenceNumber {
+				if preprepare.SignedMessage.PrePrepareMessage.Number.SeqNumber > n.sequenceNumber {
 					n.handlePrePrepare(&preprepare)
 				}
 			}
@@ -105,7 +105,7 @@ func (n *PBFTNode) handleNewView(message *NewView) {
 		// and enter view + 1
 		n.enterNewView(message.ViewNumber)
 		for _, preprepare := range message.PrePrepares {
-			if preprepare.PrePrepareMessage.Number.SeqNumber > n.sequenceNumber {
+			if preprepare.SignedMessage.PrePrepareMessage.Number.SeqNumber > n.sequenceNumber {
 				n.handlePrePrepare(&preprepare)
 			}
 		}
@@ -203,7 +203,7 @@ func (n PBFTNode) NewView(req *NewView, res *Ack) error {
 //       Primary creates Pre-prepare with a no-op message.
 // Then the primary appends the messages in O to its log.
 // Then enters new view.
-func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]PrePrepareFull {
+func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]FullPrePrepare {
 	// 1. The primary determines the sequence number min-s of the
 	//    latest stable checkpoint in V and the highest sequence
 	//    number max-s in a prepare message in V.
@@ -242,7 +242,7 @@ func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]PrePrepare
 	n.Log("sending prepares for messages between %d and %d", minS, maxS)
 	// 2. The primary creates a new pre-prepare message for view
 	//    v+1 for each sequence number n between min-s and max-s.
-	preprepares := make(map[SlotId]PrePrepareFull)
+	preprepares := make(map[SlotId]FullPrePrepare)
 	if minS < maxS {
 		for s := minS; s <= maxS; s++ {
 			slotId := SlotId{
@@ -271,20 +271,23 @@ func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]PrePrepare
 				requestDigest = emptyRequestDigest
 
 			}
-			preprepare := PrePrepareFull{
-				PrePrepareMessage: PrePrepare{
-					Number:        slotId,
-					RequestDigest: requestDigest,
-					Digest:        [sha256.Size]byte{},
-				},
-				Request: request,
+			message := PrePrepare{
+				Number:        slotId,
+				RequestDigest: requestDigest,
 			}
-			preprepare.PrePrepareMessage.SetDigest()
+			signedMessage, err := message.Sign(n.entity)
+			if err != nil {
+				n.Error("Error signing preprepares on view change: " + err.Error())
+			}
+			preprepare := FullPrePrepare{
+				SignedMessage: *signedMessage,
+				Request:       request,
+			}
 			preprepares[slotId] = preprepare
 			n.log[slotId] = &Slot{
 				request:       &request,
 				requestDigest: requestDigest,
-				preprepare:    &preprepare.PrePrepareMessage,
+				preprepare:    &preprepare.SignedMessage,
 				prepares:      make(map[NodeId]Prepare),
 				commits:       make(map[NodeId]*Commit),
 				prepared:      false,

@@ -40,22 +40,25 @@ func LoadConfig(filename string) pbft.ClusterConfig {
 func LoadInitialKeys(filename string, config *pbft.ClusterConfig) map[string]string {
 	log.Infof("Reading initial keys from %s...", filename)
 
-	keyData, err := ioutil.ReadFile(filename)
-	logFatal(err)
-
-	var initialKeys []pbft.KeyPair
-	err = json.Unmarshal(keyData, &initialKeys)
-	logFatal(err)
-
-	for _, n := range config.Nodes {
-		initialKeys = append(initialKeys, pbft.KeyPair{Key: n.Key, Alias: util.GetHostname(n.Host, n.Port)})
-	}
-
 	initialKeyTable := make(map[string]string)
-	for _, kp := range initialKeys {
-		initialKeyTable[string(kp.Alias)] = string(kp.Key)
-		log.Debugf("    %v => %v", kp.Alias, kp.Key)
-	}
+	// TODO: (jlwatson) fix this shiiiiii
+	/*
+		keyData, err := ioutil.ReadFile(filename)
+		logFatal(err)
+
+		var initialKeys []pbft.KeyPair
+		err = json.Unmarshal(keyData, &initialKeys)
+		logFatal(err)
+
+		for _, n := range config.Nodes {
+			initialKeys = append(initialKeys, pbft.KeyPair{Key: n.Key, Alias: util.GetHostname(n.Host, n.Port)})
+		}
+
+		for _, kp := range initialKeys {
+			initialKeyTable[string(kp.Alias)] = string(kp.Key)
+			log.Debugf("    %v => %v", kp.Alias, kp.Key)
+		}
+	*/
 	return initialKeyTable
 }
 
