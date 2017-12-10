@@ -45,22 +45,22 @@ func SpawnKeyNode(config pbft.NodeConfig, cluster *pbft.ClusterConfig, store *ke
 	}
 
 	go keyNode.handleUpdates()
-	// go keyNode.serveKeyRequests()
+	go keyNode.serveKeyRequests()
 	return &keyNode
 }
 
-// func (kn *KeyNode) serveKeyRequests() {
-// 	for request := range kn.consensusNode.KeyRequest {
-// 		s := "testkey"
-// 		request.Reply <- &s
-// 		// TODO: finish implementing
-// 		// if v, ok := kn.store.Get(request.Hostname); ok {
-// 		// 	request.Reply <- v
-// 		// } else {
-// 		// 	request.Reply <- nil
-// 		// }
-// 	}
-// }
+func (kn *KeyNode) serveKeyRequests() {
+	for request := range kn.consensusNode.KeyRequest {
+		s := "testkey"
+		request.Reply <- &s
+		// TODO: finish implementing
+		// if v, ok := kn.store.Get(request.Hostname); ok {
+		// 	request.Reply <- v
+		// } else {
+		// 	request.Reply <- nil
+		// }
+	}
+}
 
 func (kn *KeyNode) testPropose() {
 	alias := keystore.Alias("testalias")
@@ -187,19 +187,19 @@ func writeJSON(msg string, w *http.ResponseWriter) {
 	}
 }
 
-func (kn *KeyNode) getPendingRequest(digest [sha256.Size]byte) chan string {
+func (kn *KeyNode) respondPendingRequest(digest [sha256.Size]byte, response string) {
 	if request, ok := kn.pendingRequests.Load(digest); !ok {
 		kn.logger.Debugf("No corresponding http request for operation digest %v", digest)
-		return make(chan string)
+		return
 	} else {
-		return request.(chan string)
+		request.(chan string) <- response
 	}
 }
 
-func (kn *KeyNode) StartClientServer(rpcPort int) {
+func (kn *KeyNode) StartClientServer(httpPort int) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handlerWithContext(kn))
-	log.Fatal(http.ListenAndServe(util.GetHostname("", rpcPort), mux))
+	log.Fatal(http.ListenAndServe(util.GetHostname("", httpPort), mux))
 }
 
 func (kn *KeyNode) handleUpdates() {
@@ -258,6 +258,7 @@ func (kn *KeyNode) handleSnapshot(snapshot *[]byte) {
 }
 
 func (kn *KeyNode) handleCommit(operation *string) {
+	kn.logger.Infof("handlecommit")
 	if operation == nil {
 		return
 	}
@@ -266,7 +267,7 @@ func (kn *KeyNode) handleCommit(operation *string) {
 	err := gob.NewDecoder(bytes.NewReader([]byte(*operation))).Decode(&keyOp)
 	if err != nil {
 		kn.logger.Error(err)
-		kn.getPendingRequest(keyOp.Digest) <- err.Error()
+		kn.respondPendingRequest(keyOp.Digest, err.Error())
 		return
 	}
 
@@ -279,7 +280,7 @@ func (kn *KeyNode) handleCommit(operation *string) {
 		if !ok {
 			error := "Operation not a Create (handleCommit)"
 			kn.logger.Error(error)
-			kn.getPendingRequest(keyOp.Digest) <- error
+			kn.respondPendingRequest(keyOp.Digest, error)
 			return
 		}
 		kn.logger.Infof("Commit create to keystore: %v", create)
@@ -290,14 +291,14 @@ func (kn *KeyNode) handleCommit(operation *string) {
 		if !ok {
 			error := "Operation not a Update (handleCommit)"
 			kn.logger.Error(error)
-			kn.getPendingRequest(keyOp.Digest) <- error
+			kn.respondPendingRequest(keyOp.Digest, error)
 			return
 		}
 		kn.logger.Infof("Commit update to keystore: %v", update)
 		// TODO: Update keystore
 	}
 
-	kn.getPendingRequest(keyOp.Digest) <- ""
+	kn.respondPendingRequest(keyOp.Digest, "")
 }
 
 func (kn *KeyNode) CreateKey(args *clientapi.KeyOperation, reply *clientapi.Ack) error {
