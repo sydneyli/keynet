@@ -53,6 +53,31 @@ func generateRandomAliasKeyPair() (string, string) {
 	return RandomString(10), RandomString(10)
 }
 
+func concurrentPutHelper(t *testing.T, cluster *pbft.ClusterConfig, concurrent int) {
+	npeers := len(cluster.Nodes)
+	aliases := make([]string, 0)
+	keys := make([]string, 0)
+	for i := 0; i < concurrent; i++ {
+		go func() {
+			putAt := r.Intn(npeers)
+			alias, key := generateRandomAliasKeyPair()
+			putStatus := doPut(cluster, getNode(cluster, putAt+1), alias, key)
+			aliases = append(aliases, alias)
+			keys = append(keys, key)
+			assertEqual(t, putStatus, "200 OK", "")
+		}()
+	}
+	<-time.After(time.Duration(int(time.Second) / 2 * concurrent))
+	for i := 0; i < concurrent; i++ {
+		getFrom := r.Intn(npeers)
+		alias := aliases[i]
+		key := keys[i]
+		status, result := doGet(cluster, getNode(cluster, getFrom+1), alias)
+		assertEqual(t, status, "200 OK", "")
+		assertEqual(t, result, fmt.Sprintf("\"%s\"", key), "")
+	}
+}
+
 func testPutHelper(t *testing.T, cluster *pbft.ClusterConfig, putAt int, getAt int) (string, string) {
 	leader := getNode(cluster, putAt)
 	alias, key := generateRandomAliasKeyPair()
@@ -150,7 +175,6 @@ func TestBackupCatchesUp(t *testing.T) {
 		sendDebugMessageToNode(cluster, 3, pbft.DebugMessage{Op: pbft.DOWN})
 		// 2. Commit a value without them.
 		alias, key := testPutHelper(t, cluster, 2, 4)
-		// testPutHelper(t, cluster, 3, 5)
 		// 3. Bring node back.
 		sendDebugMessageToNode(cluster, 3, pbft.DebugMessage{Op: pbft.UP})
 		<-time.After(time.Second)
@@ -158,6 +182,17 @@ func TestBackupCatchesUp(t *testing.T) {
 		status, result := doGet(cluster, getNode(cluster, 3), alias)
 		assertEqual(t, status, "200 OK", "")
 		assertEqual(t, result, fmt.Sprintf("\"%s\"", key), "")
+	}(&cluster, shutdownSignal)
+	startCluster(&cluster, shutdownSignal)
+}
+
+func TestConcurrentWrites(t *testing.T) {
+	shutdownSignal := make(chan bool)
+	cluster := LoadConfig("cluster.json")
+	go func(cluster *pbft.ClusterConfig, shutdownSignal chan bool) {
+		<-time.After(time.Second)
+		defer func() { shutdownSignal <- true }()
+		concurrentPutHelper(t, cluster, 5)
 	}(&cluster, shutdownSignal)
 	startCluster(&cluster, shutdownSignal)
 }

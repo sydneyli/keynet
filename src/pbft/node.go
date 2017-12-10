@@ -159,7 +159,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		requestSnapshotChannel: make(chan SlotId),
 		errorChannel:           make(chan error),
 		requestChannel:         make(chan *string, 10), // some nice inherent rate limiting
-		recvSnapshotChannel:    make(chan snapshot),
+		recvSnapshotChannel:    make(chan snapshot, 1), // buffer to prevent deadlock
 		snapshottedChannel:     make(chan *[]byte),
 		preprepareChannel:      make(chan *PrePrepareFull),
 		prepareChannel:         make(chan *Prepare),
