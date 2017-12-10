@@ -661,6 +661,10 @@ func (n *PBFTNode) startTimers() {
 	}
 }
 
+func (n PBFTNode) Id() NodeId {
+	return n.id
+}
+
 func (n PBFTNode) Failure() chan error {
 	return n.errorChannel
 }

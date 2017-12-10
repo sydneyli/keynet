@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	plog = capnslog.NewPackageLogger("github.com/sydli/distributePKI", "keystore")
+	plog = capnslog.NewPackageLogger("github.com/sydli/distributePKI", "Keystore")
 )
 
 type Alias string
