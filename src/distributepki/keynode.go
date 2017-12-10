@@ -299,7 +299,7 @@ func (kn *KeyNode) handleCommit(operation *string) {
 			return
 		}
 		kn.logger.Infof("Commit update to keystore: %v", update)
-		// TODO: Update keystore
+		kn.store.UpdateKey(update.Alias, update.Key)
 	}
 
 	kn.respondPendingRequest(keyOp.Digest, "")
