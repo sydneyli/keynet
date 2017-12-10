@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"distributepki/clientapi"
 	"distributepki/keystore"
 	"distributepki/util"
@@ -106,11 +107,13 @@ func handlerWithContext(kn *KeyNode) func(http.ResponseWriter, *http.Request) {
 				response = key
 			} else {
 				http.Error(w, "Key not found", http.StatusNotFound)
+				return
 			}
 			jsonBody, err := json.Marshal(response)
 			if err != nil {
 				http.Error(w, "Error converting results to json",
 					http.StatusInternalServerError)
+				return
 			}
 			w.Write(jsonBody)
 		case "POST":
@@ -126,8 +129,12 @@ func handlerWithContext(kn *KeyNode) func(http.ResponseWriter, *http.Request) {
 				Op:     clientapi.Create{alias, key, time.Now(), nil},
 			}
 			op.SetDigest()
-			kn.CreateKey(&op, nil)
-			kn.waitForCommit(&op, &w)
+			if error := kn.CreateKey(&op, nil); error == nil {
+				kn.waitForCommit(&op, &w)
+			} else {
+				http.Error(w, error.Error(), http.StatusBadRequest)
+				return
+			}
 		}
 	}
 }
@@ -135,13 +142,38 @@ func handlerWithContext(kn *KeyNode) func(http.ResponseWriter, *http.Request) {
 func (kn *KeyNode) waitForCommit(op *clientapi.KeyOperation, w *http.ResponseWriter) {
 	responseChan := make(chan string)
 	kn.pendingRequests.Store(op.Digest, responseChan)
-	kn.logger.Infof("[Node %v] Store pending request with digest: %v", kn.consensusNode.Id(), op.Digest)
-	<-responseChan
-	if jsonBody, err := json.Marshal(""); err == nil {
+	kn.logger.Infof("Store pending request with digest: %v", op.Digest)
+
+	var error string
+	select {
+	case error = <-responseChan:
+	case <-time.After(time.Second * 10):
+		error = "Timeout on wait for Commit"
+	}
+
+	if error == "" {
+		writeJSON("", w)
+	} else {
+		http.Error(*w, error, http.StatusInternalServerError)
+	}
+	kn.pendingRequests.Delete(op.Digest)
+}
+
+func writeJSON(msg string, w *http.ResponseWriter) {
+	if jsonBody, err := json.Marshal(msg); err == nil {
 		(*w).Write(jsonBody)
 	} else {
 		http.Error(*w, "Error converting results to json",
 			http.StatusInternalServerError)
+	}
+}
+
+func (kn *KeyNode) getPendingRequest(digest [sha256.Size]byte) chan string {
+	if request, ok := kn.pendingRequests.Load(digest); !ok {
+		kn.logger.Debugf("No corresponding http request for operation digest %v", digest)
+		return make(chan string)
+	} else {
+		return request.(chan string)
 	}
 }
 
@@ -215,6 +247,7 @@ func (kn *KeyNode) handleCommit(operation *string) {
 	err := gob.NewDecoder(bytes.NewReader([]byte(*operation))).Decode(&keyOp)
 	if err != nil {
 		kn.logger.Error(err)
+		kn.getPendingRequest(keyOp.Digest) <- err.Error()
 		return
 	}
 
@@ -225,7 +258,9 @@ func (kn *KeyNode) handleCommit(operation *string) {
 	case clientapi.OP_CREATE:
 		create, ok := keyOp.Op.(clientapi.Create)
 		if !ok {
-			kn.logger.Error("Operation not a Create (handleCommit)")
+			error := "Operation not a Create (handleCommit)"
+			kn.logger.Error(error)
+			kn.getPendingRequest(keyOp.Digest) <- error
 			return
 		}
 		kn.logger.Infof("Commit create to keystore: %v", create)
@@ -234,18 +269,16 @@ func (kn *KeyNode) handleCommit(operation *string) {
 	case clientapi.OP_UPDATE:
 		update, ok := keyOp.Op.(clientapi.Update)
 		if !ok {
-			kn.logger.Error("Operation not a Update (handleCommit)")
+			error := "Operation not a Update (handleCommit)"
+			kn.logger.Error(error)
+			kn.getPendingRequest(keyOp.Digest) <- error
 			return
 		}
 		kn.logger.Infof("Commit update to keystore: %v", update)
 		// TODO: Update keystore
 	}
 
-	if request, ok := kn.pendingRequests.Load(keyOp.Digest); !ok {
-		kn.logger.Debugf("[Node %v]  No corresponding http request for operation digest %v", kn.consensusNode.Id(), keyOp.Digest)
-	} else {
-		request.(chan string) <- ""
-	}
+	kn.getPendingRequest(keyOp.Digest) <- ""
 }
 
 func (kn *KeyNode) CreateKey(args *clientapi.KeyOperation, reply *clientapi.Ack) error {
@@ -269,6 +302,13 @@ func (kn *KeyNode) CreateKey(args *clientapi.KeyOperation, reply *clientapi.Ack)
 		kn.logger.Error(errMsg)
 		return errors.New(errMsg)
 	}
+
+	if ok, _ := kn.store.LookupKey((args.Op.(clientapi.Create)).Alias); ok {
+		errMsg := "Key already exists for user (CreateKey)"
+		kn.logger.Error(errMsg)
+		return errors.New(errMsg)
+	}
+
 	kn.logger.Infof("Create Key: %+v", create)
 
 	var buf bytes.Buffer
