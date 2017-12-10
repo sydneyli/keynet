@@ -61,6 +61,7 @@ type Create struct {
 	Key       keystore.Key
 	Timestamp int64
 	Client    net.Addr
+	Signature keystore.Signature // Signature of authority
 }
 
 type Update struct {
@@ -84,6 +85,7 @@ type CreateJSON struct {
 	Alias     string
 	Key       string
 	Timestamp int64
+	Signature string
 }
 
 func (createJSON *CreateJSON) ToCreate() (Create, error) {
@@ -92,6 +94,7 @@ func (createJSON *CreateJSON) ToCreate() (Create, error) {
 		Key:       keystore.Key(createJSON.Key),
 		Timestamp: createJSON.Timestamp,
 		Client:    nil,
+		Signature: keystore.Signature(createJSON.Signature),
 	}, nil
 }
 
