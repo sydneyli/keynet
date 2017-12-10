@@ -105,7 +105,7 @@ func handlerWithContext(kn *KeyNode) func(http.ResponseWriter, *http.Request) {
 			if found, key := kn.LookupKey(&op, nil); found {
 				response = key
 			} else {
-				http.Error(w, "Key not found", http.StatusBadRequest)
+				http.Error(w, "Key not found", http.StatusNotFound)
 			}
 			jsonBody, err := json.Marshal(response)
 			if err != nil {
@@ -137,7 +137,12 @@ func (kn *KeyNode) waitForCommit(op *clientapi.KeyOperation, w *http.ResponseWri
 	kn.pendingRequests.Store(op.Digest, responseChan)
 	kn.logger.Infof("[Node %v] Store pending request with digest: %v", kn.consensusNode.Id(), op.Digest)
 	<-responseChan
-	(*w).Write([]byte{})
+	if jsonBody, err := json.Marshal(""); err == nil {
+		(*w).Write(jsonBody)
+	} else {
+		http.Error(*w, "Error converting results to json",
+			http.StatusInternalServerError)
+	}
 }
 
 func (kn *KeyNode) StartClientServer(rpcPort int) {
