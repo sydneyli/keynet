@@ -6,7 +6,6 @@ import (
 	"distributepki/keystore"
 	"encoding/json"
 	"net"
-	"time"
 
 	"github.com/coreos/pkg/capnslog"
 )
@@ -60,24 +59,54 @@ func (ko *KeyOperation) DigestValid() bool {
 type Create struct {
 	Alias     keystore.Alias
 	Key       keystore.Key
-	Timestamp time.Time
+	Timestamp int64
 	Client    net.Addr
 }
 
 type Update struct {
 	Alias     keystore.Alias
 	Key       keystore.Key
-	Timestamp time.Time
+	Timestamp int64
 	Client    net.Addr
 	Signature keystore.Signature
 }
 
 type Lookup struct {
-	Alias     keystore.Alias
-	Timestamp time.Time
-	Client    net.Addr
+	Alias  keystore.Alias
+	Client net.Addr
 }
 
 type Ack struct {
 	Success bool
+}
+
+type CreateJSON struct {
+	Alias     string
+	Key       string
+	Timestamp int64
+}
+
+func (createJSON *CreateJSON) ToCreate() (Create, error) {
+	return Create{
+		Alias:     keystore.Alias(createJSON.Alias),
+		Key:       keystore.Key(createJSON.Key),
+		Timestamp: createJSON.Timestamp,
+		Client:    nil,
+	}, nil
+}
+
+type UpdateJSON struct {
+	Alias     string
+	Key       string
+	Timestamp int64
+	Signature string
+}
+
+func (updateJSON *UpdateJSON) ToUpdate() (Update, error) {
+	return Update{
+		Alias:     keystore.Alias(updateJSON.Alias),
+		Key:       keystore.Key(updateJSON.Key),
+		Timestamp: updateJSON.Timestamp,
+		Signature: keystore.Signature(updateJSON.Signature),
+	}, nil
 }

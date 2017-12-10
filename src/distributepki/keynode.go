@@ -62,31 +62,31 @@ func (kn *KeyNode) serveKeyRequests() {
 	}
 }
 
-func (kn *KeyNode) testPropose() {
-	alias := keystore.Alias("testalias")
-	<-time.NewTimer(time.Second * 2).C
+// func (kn *KeyNode) testPropose() {
+// 	alias := keystore.Alias("testalias")
+// 	<-time.NewTimer(time.Second * 2).C
 
-	op := clientapi.KeyOperation{
-		OpCode: clientapi.OP_CREATE,
-		Op:     clientapi.Create{alias, keystore.Key("testkey"), time.Now(), nil},
-	}
-	op.SetDigest()
+// 	op := clientapi.KeyOperation{
+// 		OpCode: clientapi.OP_CREATE,
+// 		Op:     clientapi.Create{alias, keystore.Key("testkey"), time.Now(), nil},
+// 	}
+// 	op.SetDigest()
 
-	kn.CreateKey(&op, nil)
-	<-time.NewTimer(time.Second * 2).C
+// 	kn.CreateKey(&op, nil)
+// 	<-time.NewTimer(time.Second * 2).C
 
-	lookup := clientapi.KeyOperation{
-		OpCode: clientapi.OP_LOOKUP,
-		Op:     clientapi.Lookup{alias, time.Now(), nil},
-	}
-	lookup.SetDigest()
+// 	lookup := clientapi.KeyOperation{
+// 		OpCode: clientapi.OP_LOOKUP,
+// 		Op:     clientapi.Lookup{alias, time.Now(), nil},
+// 	}
+// 	lookup.SetDigest()
 
-	if found, key := kn.LookupKey(&lookup, nil); found {
-		kn.logger.Infof("Lookup got key: %v for alias %v", key, alias)
-	} else {
-		kn.logger.Infof("Lookup key failed for alias %v", alias)
-	}
-}
+// 	if found, key := kn.LookupKey(&lookup, nil); found {
+// 		kn.logger.Infof("Lookup got key: %v for alias %v", key, alias)
+// 	} else {
+// 		kn.logger.Infof("Lookup key failed for alias %v", alias)
+// 	}
+// }
 
 // is there a better way to bind this variable to the inner fn...?
 func handlerWithContext(kn *KeyNode) func(http.ResponseWriter, *http.Request) {
@@ -104,7 +104,7 @@ func handlerWithContext(kn *KeyNode) func(http.ResponseWriter, *http.Request) {
 			alias := keystore.Alias(r.URL.Query().Get("name"))
 			op := clientapi.KeyOperation{
 				OpCode: clientapi.OP_LOOKUP,
-				Op:     clientapi.Lookup{alias, time.Now(), nil},
+				Op:     clientapi.Lookup{alias, nil},
 			}
 			op.SetDigest()
 
@@ -122,16 +122,29 @@ func handlerWithContext(kn *KeyNode) func(http.ResponseWriter, *http.Request) {
 			}
 			w.Write(jsonBody)
 		case "POST":
-			alias := keystore.Alias(r.URL.Query().Get("name"))
-			keybytes, err := ioutil.ReadAll(r.Body)
+			bodyData, err := ioutil.ReadAll(r.Body)
 			if err != nil {
-				http.Error(w, "Error reading key.", http.StatusInternalServerError)
+				http.Error(w, "Error reading body.", http.StatusInternalServerError)
 				return
 			}
-			key := keystore.Key(string(keybytes[:]))
+
+			createJSON := clientapi.CreateJSON{}
+			err = json.Unmarshal(bodyData, &createJSON)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			var create clientapi.Create
+			create, err = createJSON.ToCreate()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
 			op := clientapi.KeyOperation{
 				OpCode: clientapi.OP_CREATE,
-				Op:     clientapi.Create{alias, key, time.Now(), nil},
+				Op:     create,
 			}
 			op.SetDigest()
 			if error := kn.CreateKey(&op, nil); error == nil {
@@ -141,16 +154,29 @@ func handlerWithContext(kn *KeyNode) func(http.ResponseWriter, *http.Request) {
 				return
 			}
 		case "PUT":
-			alias := keystore.Alias(r.URL.Query().Get("name"))
-			keybytes, err := ioutil.ReadAll(r.Body)
+			bodyData, err := ioutil.ReadAll(r.Body)
 			if err != nil {
 				http.Error(w, "Error reading key.", http.StatusInternalServerError)
 				return
 			}
-			key := keystore.Key(string(keybytes[:]))
+
+			updateJSON := clientapi.UpdateJSON{}
+			err = json.Unmarshal(bodyData, &updateJSON)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			var update clientapi.Update
+			update, err = updateJSON.ToUpdate()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
 			op := clientapi.KeyOperation{
 				OpCode: clientapi.OP_UPDATE,
-				Op:     clientapi.Update{alias, key, time.Now(), nil, keystore.Signature("")},
+				Op:     update,
 			}
 			op.SetDigest()
 			if error := kn.UpdateKey(&op, nil); error == nil {
