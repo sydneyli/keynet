@@ -1,6 +1,8 @@
 package util
 
 import (
+	"fmt"
+
 	"github.com/coreos/pkg/capnslog"
 
 	"crypto/sha256"
@@ -37,7 +39,7 @@ func SendRpc(hostName string, endpoint string, rpcFunction string, message inter
 			return result.Error
 		}
 	case <-time.After(timeout):
-		return errors.New("Timed out")
+		return errors.New(fmt.Sprintf("RPC Send %v to %v timed out", rpcFunction, hostName))
 	}
 	return nil
 

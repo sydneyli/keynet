@@ -135,6 +135,25 @@ func handlerWithContext(kn *KeyNode) func(http.ResponseWriter, *http.Request) {
 				http.Error(w, error.Error(), http.StatusBadRequest)
 				return
 			}
+		case "PUT":
+			alias := keystore.Alias(r.URL.Query().Get("name"))
+			keybytes, err := ioutil.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "Error reading key.", http.StatusInternalServerError)
+				return
+			}
+			key := keystore.Key(string(keybytes[:]))
+			op := clientapi.KeyOperation{
+				OpCode: clientapi.OP_UPDATE,
+				Op:     clientapi.Update{alias, key, time.Now(), nil, keystore.Signature("")},
+			}
+			op.SetDigest()
+			if error := kn.UpdateKey(&op, nil); error == nil {
+				kn.waitForCommit(&op, &w)
+			} else {
+				http.Error(w, error.Error(), http.StatusBadRequest)
+				return
+			}
 		}
 	}
 }
@@ -347,6 +366,13 @@ func (kn *KeyNode) UpdateKey(args *clientapi.KeyOperation, reply *clientapi.Ack)
 		kn.logger.Error(errMsg)
 		return errors.New(errMsg)
 	}
+
+	if ok, _ := kn.store.LookupKey((args.Op.(clientapi.Update)).Alias); !ok {
+		errMsg := "Key does not exist for user (UpdateKey)"
+		kn.logger.Error(errMsg)
+		return errors.New(errMsg)
+	}
+
 	kn.logger.Infof("Update Key: %+v", update)
 
 	var buf bytes.Buffer

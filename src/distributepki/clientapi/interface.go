@@ -66,9 +66,10 @@ type Create struct {
 
 type Update struct {
 	Alias     keystore.Alias
-	Update    keystore.KeyUpdate
+	Key       keystore.Key
 	Timestamp time.Time
 	Client    net.Addr
+	Signature keystore.Signature
 }
 
 type Lookup struct {
