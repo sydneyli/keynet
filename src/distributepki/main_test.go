@@ -150,7 +150,7 @@ func TestBackupCatchesUp(t *testing.T) {
 		sendDebugMessageToNode(cluster, 3, pbft.DebugMessage{Op: pbft.DOWN})
 		// 2. Commit a value without them.
 		alias, key := testPutHelper(t, cluster, 2, 4)
-		testPutHelper(t, cluster, 3, 5)
+		// testPutHelper(t, cluster, 3, 5)
 		// 3. Bring node back.
 		sendDebugMessageToNode(cluster, 3, pbft.DebugMessage{Op: pbft.UP})
 		<-time.After(time.Second)

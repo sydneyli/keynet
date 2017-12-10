@@ -665,6 +665,10 @@ func (n PBFTNode) Id() NodeId {
 	return n.id
 }
 
+func (n PBFTNode) Down() bool {
+	return n.down
+}
+
 func (n PBFTNode) Failure() chan error {
 	return n.errorChannel
 }

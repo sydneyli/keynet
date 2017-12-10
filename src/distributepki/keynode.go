@@ -91,6 +91,11 @@ func (kn *KeyNode) testPropose() {
 // is there a better way to bind this variable to the inner fn...?
 func handlerWithContext(kn *KeyNode) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if kn.consensusNode.Down() {
+			kn.logger.Info("I'm down")
+			return
+		}
+
 		switch r.Method {
 
 		// TODO: have client send signed KeyOperations directly, rather than generating them here
