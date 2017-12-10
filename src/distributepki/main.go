@@ -1,5 +1,7 @@
 package main
 
+import _ "net/http/pprof"
+
 import (
 	"distributepki/clientapi"
 	"distributepki/keystore"
@@ -9,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -60,6 +63,10 @@ func LoadInitialKeys(filename string, config *pbft.ClusterConfig) map[string]str
 }
 
 func main() {
+
+	go func() {
+		http.ListenAndServe("localhost:6060", nil)
+	}()
 
 	configFile := flag.String("config", "cluster.json", "PBFT configuration file")
 	cluster := flag.Bool("cluster", false, "Bootstrap entire cluster")

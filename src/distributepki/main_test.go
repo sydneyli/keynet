@@ -85,7 +85,7 @@ func sendDebugMessageToNode(cluster *pbft.ClusterConfig, nodeId int, message pbf
 
 func TestNormalOperation(t *testing.T) {
 	shutdownSignal := make(chan bool)
-	cluster := LoadConfig("cluster.json")
+	cluster := LoadConfig("prod_cluster.json")
 	go func(cluster *pbft.ClusterConfig, shutdownSignal chan bool) {
 		<-time.After(time.Second / 4)
 		defer func() { shutdownSignal <- true }()
@@ -100,7 +100,7 @@ func TestNormalOperation(t *testing.T) {
 
 func TestViewChangeAfterCommit(t *testing.T) {
 	shutdownSignal := make(chan bool)
-	cluster := LoadConfig("cluster.json")
+	cluster := LoadConfig("prod_cluster.json")
 	go func(cluster *pbft.ClusterConfig, shutdownSignal chan bool) {
 		<-time.After(time.Second / 4)
 		defer func() { shutdownSignal <- true }()
@@ -118,7 +118,7 @@ func TestViewChangeAfterCommit(t *testing.T) {
 
 func TestCommitDuringViewChange(t *testing.T) {
 	shutdownSignal := make(chan bool)
-	cluster := LoadConfig("cluster.json")
+	cluster := LoadConfig("prod_cluster.json")
 	go func(cluster *pbft.ClusterConfig, shutdownSignal chan bool) {
 		<-time.After(time.Second / 4)
 		defer func() { shutdownSignal <- true }()
@@ -141,7 +141,7 @@ func TestCommitDuringViewChange(t *testing.T) {
 
 func TestBackupCatchesUp(t *testing.T) {
 	shutdownSignal := make(chan bool)
-	cluster := LoadConfig("cluster.json")
+	cluster := LoadConfig("prod_cluster.json")
 	go func(cluster *pbft.ClusterConfig, shutdownSignal chan bool) {
 		<-time.After(time.Second / 4)
 		defer func() { shutdownSignal <- true }()
