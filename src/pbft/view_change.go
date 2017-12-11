@@ -289,7 +289,7 @@ func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]FullPrePre
 				requestDigest: requestDigest,
 				preprepare:    &preprepare.SignedMessage,
 				prepares:      make(map[NodeId]SignedPrepare),
-				commits:       make(map[NodeId]*Commit),
+				commits:       make(map[NodeId]*SignedCommit),
 				prepared:      false,
 				committed:     false,
 			}

@@ -39,7 +39,7 @@ type PBFTNode struct {
 	prepareChannel         chan *SignedPrepare
 	checkpointChannel      chan *Checkpoint
 	checkpointProofChannel chan *CheckpointProof
-	commitChannel          chan *Commit
+	commitChannel          chan *SignedCommit
 	viewChangeChannel      chan *ViewChange
 	newViewChannel         chan *NewView
 	requestTimeoutChannel  chan bool
@@ -206,7 +206,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		snapshottedChannel:     make(chan *[]byte),
 		preprepareChannel:      make(chan *FullPrePrepare),
 		prepareChannel:         make(chan *SignedPrepare),
-		commitChannel:          make(chan *Commit),
+		commitChannel:          make(chan *SignedCommit),
 		checkpointChannel:      make(chan *Checkpoint),
 		checkpointProofChannel: make(chan *CheckpointProof),
 		viewChangeChannel:      make(chan *ViewChange),
@@ -279,7 +279,7 @@ func (n *PBFTNode) ensureMapping(num SlotId) *Slot {
 			requestDigest: [sha256.Size]byte{},
 			preprepare:    nil,
 			prepares:      make(map[NodeId]SignedPrepare),
-			commits:       make(map[NodeId]*Commit),
+			commits:       make(map[NodeId]*SignedCommit),
 			prepared:      false,
 			committed:     false,
 		}
@@ -407,7 +407,7 @@ func (n *PBFTNode) handleClientRequest(request *string) {
 			requestDigest: requestDigest,
 			preprepare:    &fullMessage.SignedMessage,
 			prepares:      make(map[NodeId]SignedPrepare),
-			commits:       make(map[NodeId]*Commit),
+			commits:       make(map[NodeId]*SignedCommit),
 			prepared:      false,
 			committed:     false,
 		}
@@ -549,51 +549,57 @@ func (n *PBFTNode) handlePrepare(message *SignedPrepare) {
 			Number:        prepare.Number,
 			RequestDigest: prepare.RequestDigest,
 			Node:          n.id,
-			Digest:        [sha256.Size]byte{},
 		}
-		commit.SetDigest()
-		slot.commits[n.id] = &commit
-		go n.broadcast("PBFTNode.Commit", &commit, 0)
+		signedMessage, err := commit.Sign(n.entity)
+		if err != nil {
+			n.Log("Signing commit: " + err.Error())
+			return
+		}
+
+		slot.commits[n.id] = signedMessage
+		go n.broadcast("PBFTNode.Commit", signedMessage, 0)
 	}
 }
 
-func (n *PBFTNode) handleCommit(message *Commit) {
+func (n *PBFTNode) handleCommit(message *SignedCommit) {
 	if n.viewChange.inProgress {
 		return
 	}
 
-	/*
-		sender, err := message.SignedMessage.SignatureValid(n.peerEntities, n.peerEntityMap)
-		if err != nil {
-			n.Log("Validating Prepare signature: " + err.Error())
-			return
-		}
-	*/
-
-	if message.Number.Before(n.lastCheckpoint.Number) {
+	sender, err := message.SignatureValid(n.peerEntities, n.peerEntityMap)
+	if err != nil {
+		n.Log("Validating Commit signature: " + err.Error())
+		return
+	} else if sender != message.CommitMessage.Node {
+		n.Log("Error: received Commit not signed by correct sending node")
 		return
 	}
 
-	slot := n.ensureMapping(message.Number)
-	if slot.request != nil && slot.requestDigest != message.RequestDigest {
-		plog.Errorf("Received commit for slot id %+v with mismatched digest.", message.Number)
+	commit := message.CommitMessage
+	if commit.Number.Before(n.lastCheckpoint.Number) {
+		return
 	}
-	slot.commits[message.Node] = message
+
+	slot := n.ensureMapping(commit.Number)
+	if slot.request != nil && slot.requestDigest != commit.RequestDigest {
+		plog.Errorf("Received commit for slot id %+v with mismatched digest.", commit.Number)
+	}
+	slot.commits[commit.Node] = message
 	nowCommitted := !slot.committed && n.isCommitted(slot)
 	if nowCommitted {
-		n.Log("COMMITTED %+v", message.Number)
+		n.Log("COMMITTED %+v", commit.Number)
 		slot.committed = true
-		// info := n.requests[message.Message.Id] //.committed = true
-		// n.requests[message.Message.Id] = requestInfo{
+		// info := n.requests[commit.Message.Id] //.committed = true
+		// n.requests[commit.Message.Id] = requestInfo{
 		// 	id:        info.id,
 		// 	committed: true,
 		// 	request:   info.request,
 		// }
-		if message.Number.SeqNumber > n.sequenceNumber {
-			n.sequenceNumber = message.Number.SeqNumber
+		if commit.Number.SeqNumber > n.sequenceNumber {
+			n.sequenceNumber = commit.Number.SeqNumber
 		}
 	}
-	n.log[message.Number] = slot
+	n.log[commit.Number] = slot
 	if nowCommitted {
 		// TODO: try to execute as many sequential queries as possible and
 		// then reply to the clients via committedChannel. Figure out what
@@ -787,7 +793,7 @@ func (n PBFTNode) Prepare(req *SignedPrepare, res *Ack) error {
 	return nil
 }
 
-func (n PBFTNode) Commit(req *Commit, res *Ack) error {
+func (n PBFTNode) Commit(req *SignedCommit, res *Ack) error {
 	if n.down {
 		return errors.New("I'm down")
 	}

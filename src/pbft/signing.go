@@ -148,24 +148,41 @@ func (p *SignedPrepare) SignatureValid(peers openpgp.EntityList, peerMap map[Ent
 
 // Commit //
 
-func (c *Commit) generateDigest() ([sha256.Size]byte, error) {
-	var buf bytes.Buffer
+func (c *Commit) Sign(node *openpgp.Entity) (*SignedCommit, error) {
+	var sig, buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(*c); err != nil {
-		var empty [sha256.Size]byte
-		return empty, err
+		return nil, err
 	}
-	return sha256.Sum256(buf.Bytes()), nil
+
+	err := openpgp.DetachSign(&sig, node, &buf, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return &SignedCommit{
+		CommitMessage: *c,
+		Signature:     sig.Bytes(),
+	}, nil
 }
 
-func (c *Commit) SetDigest() {
-	c.Digest = [sha256.Size]byte{}
-	d, err := c.generateDigest()
-	if err != nil {
-		plog.Fatal("Error setting Commit digest")
-	} else {
-		c.Digest = d
+func (c *SignedCommit) SignatureValid(peers openpgp.EntityList, peerMap map[EntityFingerprint]NodeId) (NodeId, error) {
+	var buf, sig bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(c.CommitMessage); err != nil {
+		return 0, err
 	}
+
+	if _, err := sig.Write(c.Signature); err != nil {
+		return 0, err
+	}
+	signer, err := openpgp.CheckDetachedSignature(peers, &buf, &sig)
+	if err != nil {
+		return 0, err
+	}
+
+	return peerMap[signer.PrimaryKey.Fingerprint], nil
 }
+
+// ViewChange //
 
 func (vc *ViewChange) generateDigest() ([sha256.Size]byte, error) {
 	var buf bytes.Buffer
@@ -214,19 +231,6 @@ func (cr *ClientReply) DigestValid() bool {
 		return false
 	} else {
 		cr.digest = currentDigest
-		return d == currentDigest
-	}
-}
-
-func (c *Commit) DigestValid() bool {
-	currentDigest := c.Digest
-	c.Digest = [sha256.Size]byte{}
-	d, err := c.generateDigest()
-	if err != nil {
-		plog.Fatal("Error calculating Commit digest for validity")
-		return false
-	} else {
-		c.Digest = currentDigest
 		return d == currentDigest
 	}
 }

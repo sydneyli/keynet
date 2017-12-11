@@ -63,7 +63,7 @@ type Slot struct {
 	requestDigest [sha256.Size]byte
 	preprepare    *SignedPrePrepare
 	prepares      map[NodeId]SignedPrepare
-	commits       map[NodeId]*Commit
+	commits       map[NodeId]*SignedCommit
 	prepared      bool
 	committed     bool
 }

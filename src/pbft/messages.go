@@ -67,7 +67,11 @@ type Commit struct {
 	Number        SlotId
 	RequestDigest [sha256.Size]byte
 	Node          NodeId
-	Digest        [sha256.Size]byte
+}
+
+type SignedCommit struct {
+	CommitMessage Commit
+	Signature     []byte
 }
 
 // The checkpoint protocol is used to advance the low and high
