@@ -151,7 +151,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		plog.Errorf("StartNode(%d) reading private key: expected only 1 host PGP entity, got %d", host.Id, len(hostEntityList))
 	}
 	hostEntity := hostEntityList[0]
-	plog.Infof("host primary key: %+v", hostEntity.PrimaryKey)
+	plog.Infof("node primary key fingerprint: %+v", hostEntity.PrimaryKey.Fingerprint)
 
 	phrase, err := ioutil.ReadFile(host.PassPhraseFile)
 	if err != nil {
@@ -168,8 +168,8 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 	peermap := make(map[NodeId]string)
 	hostToPeer := make(map[string]NodeId)
 	peerEntityMap := make(map[EntityFingerprint]NodeId)
-	peerEntities := make(openpgp.EntityList, len(cluster.Nodes))
-	for i, p := range cluster.Nodes {
+	peerEntities := make(openpgp.EntityList, 0)
+	for _, p := range cluster.Nodes {
 		if p.Id != host.Id {
 			hostname := util.GetHostname(p.Host, p.Port)
 			peermap[p.Id] = hostname
@@ -182,8 +182,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 				plog.Errorf("StartNode(%d) reading node %d public key: expected only 1 PGP entity, got %d", host.Id, p.Id, len(list))
 			}
 			peerEntityMap[list[0].PrimaryKey.Fingerprint] = p.Id
-			peerEntities[i] = list[0]
-			plog.Infof("peer %d key: %+v", p.Id, peerEntities[i].PrimaryKey)
+			peerEntities = append(peerEntities, list[0])
 		}
 	}
 

@@ -102,7 +102,6 @@ func (pp *SignedPPResponse) SignatureValid(peers openpgp.EntityList, peerMap map
 	if _, err := sig.Write(pp.Signature); err != nil {
 		return 0, err
 	}
-	plog.Infof("%+v", peers)
 	signer, err := openpgp.CheckDetachedSignature(peers, &buf, &sig)
 	if err != nil {
 		return 0, err
