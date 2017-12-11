@@ -87,13 +87,17 @@ type Checkpoint struct {
 	Number   SlotId
 	Snapshot []byte
 	Node     NodeId
-	// TODO: also needs a digest i think
+}
+
+type SignedCheckpoint struct {
+	CheckpointMessage Checkpoint
+	Signature         []byte
 }
 
 type CheckpointProof struct {
 	Number   SlotId
 	Snapshot []byte
-	Proof    map[NodeId]Checkpoint
+	Proof    map[NodeId]SignedCheckpoint
 }
 
 type PreparedProof struct {
@@ -111,11 +115,11 @@ type PreparedProof struct {
 //    1 Preprepare message (signed) and 2f+1 prepares per
 // (signed by node i)
 type ViewChange struct {
-	ViewNumber      int                      // v + 1
-	Checkpoint      SlotId                   // n
-	CheckpointProof map[NodeId]Checkpoint    // C
-	Proofs          map[SlotId]PreparedProof // P
-	Node            NodeId                   // i
+	ViewNumber      int                         // v + 1
+	Checkpoint      SlotId                      // n
+	CheckpointProof map[NodeId]SignedCheckpoint // C
+	Proofs          map[SlotId]PreparedProof    // P
+	Node            NodeId                      // i
 	Digest          [sha256.Size]byte
 }
 

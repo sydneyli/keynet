@@ -182,6 +182,42 @@ func (c *SignedCommit) SignatureValid(peers openpgp.EntityList, peerMap map[Enti
 	return peerMap[signer.PrimaryKey.Fingerprint], nil
 }
 
+// Checkpoint //
+
+func (c *Checkpoint) Sign(node *openpgp.Entity) (*SignedCheckpoint, error) {
+	var sig, buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(*c); err != nil {
+		return nil, err
+	}
+
+	err := openpgp.DetachSign(&sig, node, &buf, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return &SignedCheckpoint{
+		CheckpointMessage: *c,
+		Signature:         sig.Bytes(),
+	}, nil
+}
+
+func (c *SignedCheckpoint) SignatureValid(peers openpgp.EntityList, peerMap map[EntityFingerprint]NodeId) (NodeId, error) {
+	var buf, sig bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(c.CheckpointMessage); err != nil {
+		return 0, err
+	}
+
+	if _, err := sig.Write(c.Signature); err != nil {
+		return 0, err
+	}
+	signer, err := openpgp.CheckDetachedSignature(peers, &buf, &sig)
+	if err != nil {
+		return 0, err
+	}
+
+	return peerMap[signer.PrimaryKey.Fingerprint], nil
+}
+
 // ViewChange //
 
 func (vc *ViewChange) generateDigest() ([sha256.Size]byte, error) {

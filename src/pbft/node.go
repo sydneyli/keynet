@@ -37,7 +37,7 @@ type PBFTNode struct {
 	recvSnapshotChannel    chan snapshot
 	preprepareChannel      chan *FullPrePrepare
 	prepareChannel         chan *SignedPrepare
-	checkpointChannel      chan *Checkpoint
+	checkpointChannel      chan *SignedCheckpoint
 	checkpointProofChannel chan *CheckpointProof
 	commitChannel          chan *SignedCommit
 	viewChangeChannel      chan *ViewChange
@@ -207,7 +207,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		preprepareChannel:      make(chan *FullPrePrepare),
 		prepareChannel:         make(chan *SignedPrepare),
 		commitChannel:          make(chan *SignedCommit),
-		checkpointChannel:      make(chan *Checkpoint),
+		checkpointChannel:      make(chan *SignedCheckpoint),
 		checkpointProofChannel: make(chan *CheckpointProof),
 		viewChangeChannel:      make(chan *ViewChange),
 		newViewChannel:         make(chan *NewView),
@@ -221,7 +221,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		lastCheckpoint: CheckpointProof{
 			Number:   SlotId{ViewNumber: 0, SeqNumber: 0},
 			Snapshot: make([]byte, 0),
-			Proof:    make(map[NodeId]Checkpoint)},
+			Proof:    make(map[NodeId]SignedCheckpoint)},
 		pendingCheckpoints: make(map[SlotId]CheckpointProof),
 		heartbeatTicker:    nil,
 		timeoutTimer:       nil,
