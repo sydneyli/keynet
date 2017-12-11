@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"distributepki/keystore"
+	"encoding/base64"
 	"encoding/json"
 	"net"
+	"strings"
 
 	"github.com/coreos/pkg/capnslog"
+	"golang.org/x/crypto/openpgp"
 )
 
 var (
@@ -64,12 +67,79 @@ type Create struct {
 	Signature keystore.Signature // Signature of authority
 }
 
+type keyMapping struct {
+	Alias     string
+	Key       string
+	Timestamp int64
+}
+
+func (c Create) SignatureValid(authorities openpgp.EntityList) bool {
+	nosig := keyMapping{
+		Alias:     string(c.Alias),
+		Key:       string(c.Key),
+		Timestamp: c.Timestamp,
+	}
+	signature, _ := base64.StdEncoding.DecodeString(string(c.Signature))
+	var buf, sig bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(nosig); err != nil {
+		plog.Error("Couldn't encode as json!")
+		return false
+	}
+	if _, err := sig.Write(signature); err != nil {
+		plog.Error("Not even a valid signature...")
+		return false
+	}
+	_, err := openpgp.CheckDetachedSignature(authorities, &buf, &sig)
+	if err != nil {
+		plog.Error("Not signed by correct auth")
+		return false
+	}
+	return true
+}
+
 type Update struct {
 	Alias     keystore.Alias
 	Key       keystore.Key
 	Timestamp int64
 	Client    net.Addr
 	Signature keystore.Signature
+}
+
+// XXX: This doesn't validate correctly, for some reason...
+func (u Update) SignatureValid(previousKey keystore.Key) bool {
+	keyring, readErr := openpgp.ReadArmoredKeyRing(strings.NewReader(string(previousKey)))
+	if readErr != nil {
+		plog.Error("Couldn't read previous key!")
+		return false
+	}
+	// for _, key := range keyring {
+	// 	plog.Infof("%+v", key.PrimaryKey)
+	// }
+	nosig := keyMapping{
+		Alias:     string(u.Alias),
+		Key:       string(u.Key),
+		Timestamp: u.Timestamp,
+	}
+
+	enc, error := json.Marshal(&nosig)
+	if error != nil {
+		plog.Error("Couldn't encode as json!")
+		return false
+	}
+
+	// var buf bytes.Buffer
+	// if err := json.NewEncoder(&buf).Encode(nosig); err != nil {
+	// 	plog.Error("Couldn't encode as json!")
+	// 	return false
+	// }
+	_, err := openpgp.CheckArmoredDetachedSignature(keyring, strings.NewReader(string(enc)), strings.NewReader(string(u.Signature)))
+	if err != nil {
+		plog.Error(err)
+		plog.Error("Not signed by correct auth")
+		return false
+	}
+	plog.Info("SIGNATURE CHECK PASSED")
+	return true
 }
 
 type Lookup struct {

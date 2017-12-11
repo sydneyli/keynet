@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/coreos/pkg/capnslog"
+	"golang.org/x/crypto/openpgp"
 )
 
 type KeyRequest struct {
@@ -31,7 +32,15 @@ type KeyNode struct {
 	logger          *capnslog.PackageLogger
 }
 
+var keyring openpgp.EntityList
+
 func SpawnKeyNode(config pbft.NodeConfig, cluster *pbft.ClusterConfig, store *keystore.Keystore) *KeyNode {
+	// hook in mock authority~
+	var err error
+	keyring, err = util.ReadPgpKeyFile("../mock_authority/keys/public.key")
+	if err != nil {
+		return nil
+	}
 	node := pbft.StartNode(config, *cluster)
 	if node == nil {
 		return nil
@@ -333,7 +342,6 @@ func (kn *KeyNode) handleCommit(operation *string) {
 
 func (kn *KeyNode) CreateKey(args *clientapi.KeyOperation, reply *clientapi.Ack) error {
 
-	// TODO: verify operation signature
 	if !args.DigestValid() {
 		errMsg := "Operation digest is invalid (CreateKey)"
 		kn.logger.Error(errMsg)
@@ -349,6 +357,12 @@ func (kn *KeyNode) CreateKey(args *clientapi.KeyOperation, reply *clientapi.Ack)
 	create, ok := args.Op.(clientapi.Create)
 	if !ok {
 		errMsg := "Operation not a Create (CreateKey)"
+		kn.logger.Error(errMsg)
+		return errors.New(errMsg)
+	}
+
+	if !create.SignatureValid(keyring) {
+		errMsg := "Signature is invalid (CreateKey)"
 		kn.logger.Error(errMsg)
 		return errors.New(errMsg)
 	}
@@ -378,7 +392,6 @@ func (kn *KeyNode) CreateKey(args *clientapi.KeyOperation, reply *clientapi.Ack)
 
 func (kn *KeyNode) UpdateKey(args *clientapi.KeyOperation, reply *clientapi.Ack) error {
 
-	// TODO: verify operation signature
 	if !args.DigestValid() {
 		errMsg := "Operation digest is invalid (UpdateKey)"
 		kn.logger.Error(errMsg)
@@ -398,8 +411,14 @@ func (kn *KeyNode) UpdateKey(args *clientapi.KeyOperation, reply *clientapi.Ack)
 		return errors.New(errMsg)
 	}
 
-	if ok, _ := kn.store.LookupKey((args.Op.(clientapi.Update)).Alias); !ok {
+	ok, key := kn.store.LookupKey((args.Op.(clientapi.Update)).Alias)
+	if !ok {
 		errMsg := "Key does not exist for user (UpdateKey)"
+		kn.logger.Error(errMsg)
+		return errors.New(errMsg)
+	}
+	if !update.SignatureValid(key) {
+		errMsg := "Update message not signed by client!"
 		kn.logger.Error(errMsg)
 		return errors.New(errMsg)
 	}

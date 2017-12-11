@@ -3,10 +3,8 @@ package main
 import (
 	"bufio"
 	"bytes"
-	//"distributepki/clientapi"
-	//"distributepki/keystore"
 	"distributepki/util"
-	//"encoding/gob"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -15,6 +13,7 @@ import (
 	"pbft"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func sendDebugMessage(cluster *pbft.ClusterConfig, node *pbft.NodeConfig, msg pbft.DebugMessage) {
@@ -57,25 +56,57 @@ func sendPbft(cluster *pbft.ClusterConfig, args []string, message pbft.DebugMess
 	fmt.Println("Please specify which node you want to send a debug message!")
 }
 
+// type Create struct {
+// 	Alias     keystore.Alias
+// 	Key       keystore.Key
+// 	Timestamp int64
+// 	Client    net.Addr
+// 	Signature keystore.Signature // Signature of authority
+// }
+//
+// type Update struct {
+// 	Alias     keystore.Alias
+// 	Key       keystore.Key
+// 	Timestamp int64
+// 	Client    net.Addr
+// 	Signature keystore.Signature
+// }
+
+type KeyMapping struct {
+	Alias     string
+	Key       string
+	Timestamp int64
+}
+
+func getSignedPut(alias string, key string) []byte {
+	toSign := KeyMapping{
+		Alias:     alias,
+		Key:       key,
+		Timestamp: time.Now().UnixNano() / 1000000,
+	}
+	buf := new(bytes.Buffer)
+	if err := json.NewEncoder(buf).Encode(toSign); err != nil {
+		return nil
+	}
+	resp, err := http.Post("http://localhost:8080/sign", "application/json;charset=utf8", buf)
+	if err != nil {
+		return nil
+	}
+	bytes, err2 := ioutil.ReadAll(resp.Body)
+	if err2 != nil {
+		return nil
+	}
+	return bytes
+}
+
 // TODO (sydli): clean up below code (get better at go)
 func doPut(cluster *pbft.ClusterConfig, node *pbft.NodeConfig, alias string, key string) string {
-	jsonStr := "{\"alias\": \"" + alias + "\", \"key\": \"" + key + "\", \"signature\": \"\", \"timestamp\": 0}"
-	req, err := http.NewRequest("POST", "http://"+util.GetHostname(node.Host, node.ClientPort), bytes.NewBuffer([]byte(jsonStr)))
+	create := getSignedPut(alias, key)
+	req, err := http.NewRequest("POST", "http://"+util.GetHostname(node.Host, node.ClientPort), bytes.NewBuffer([]byte(create)))
 	if err != nil {
 		log.Print(err)
 		return ""
 	}
-	/*
-		type CreateJSON struct {
-			Alias     string
-			Key       string
-			Timestamp int64
-			Signature string
-		}
-	*/
-	//q := req.URL.Query()
-	//q.Add("name", alias)
-	//req.URL.RawQuery = q.Encode()
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -161,6 +192,8 @@ func StartDebugRepl(cluster *pbft.ClusterConfig) {
 			return
 		case "get":
 			extractGetParams(cluster, cmdList[1:], doGet)
+		case "update":
+			extractPutParams(cluster, cmdList[1:], doPut)
 		case "put":
 			extractPutParams(cluster, cmdList[1:], doPut)
 			// 	case "commit":

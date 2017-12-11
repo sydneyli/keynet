@@ -4,10 +4,12 @@ import (
 	"fmt"
 
 	"github.com/coreos/pkg/capnslog"
+	"golang.org/x/crypto/openpgp"
 
 	"crypto/sha256"
 	"errors"
 	"net/rpc"
+	"os"
 	"strconv"
 	"time"
 )
@@ -42,9 +44,22 @@ func SendRpc(hostName string, endpoint string, rpcFunction string, message inter
 		return errors.New(fmt.Sprintf("RPC Send %v to %v timed out", rpcFunction, hostName))
 	}
 	return nil
-
 }
 
 func GenerateDigest(s string) ([sha256.Size]byte, error) {
 	return sha256.Sum256([]byte(s)), nil
+}
+
+func ReadPgpKeyFile(path string) (openpgp.EntityList, error) {
+	keyfile, e := os.Open(path)
+	if e != nil {
+		var empty openpgp.EntityList
+		return empty, e
+	}
+	list, readErr := openpgp.ReadArmoredKeyRing(keyfile)
+	if readErr != nil {
+		var empty openpgp.EntityList
+		return empty, readErr
+	}
+	return list, nil
 }
