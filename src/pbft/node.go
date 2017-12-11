@@ -38,7 +38,7 @@ type PBFTNode struct {
 	preprepareChannel      chan *FullPrePrepare
 	prepareChannel         chan *SignedPrepare
 	checkpointChannel      chan *SignedCheckpoint
-	checkpointProofChannel chan *CheckpointProof
+	checkpointProofChannel chan *SignedCheckpointProof
 	commitChannel          chan *SignedCommit
 	viewChangeChannel      chan *ViewChange
 	newViewChannel         chan *NewView
@@ -208,7 +208,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		prepareChannel:         make(chan *SignedPrepare),
 		commitChannel:          make(chan *SignedCommit),
 		checkpointChannel:      make(chan *SignedCheckpoint),
-		checkpointProofChannel: make(chan *CheckpointProof),
+		checkpointProofChannel: make(chan *SignedCheckpointProof),
 		viewChangeChannel:      make(chan *ViewChange),
 		newViewChannel:         make(chan *NewView),
 		requestTimeoutChannel:  make(chan bool),
@@ -650,7 +650,6 @@ func (n *PBFTNode) heartbeatMessage(peerSequence int) (string, interface{}) {
 		pp := PrePrepare{}
 		signedMessage, err := pp.Sign(n.entity)
 		if err != nil {
-			// XXX: crash the node b/c slightly too lazy to figure out what to return here...
 			plog.Fatal("Error signing empty heartbeat PrePrepare")
 		}
 		return "PBFTNode.PrePrepare", FullPrePrepare{
@@ -659,7 +658,15 @@ func (n *PBFTNode) heartbeatMessage(peerSequence int) (string, interface{}) {
 		}
 	}
 	if peerSequence < n.lastCheckpoint.Number.SeqNumber {
-		return "PBFTNode.CheckpointProof", n.lastCheckpoint
+		message := CheckpointProofMessage{
+			Proof: n.lastCheckpoint,
+			Node:  n.id,
+		}
+		signedMessage, err := message.Sign(n.entity)
+		if err != nil {
+			plog.Fatal("Error signing checkpoint proof")
+		}
+		return "PBFTNode.CheckpointProof", signedMessage
 	}
 
 	slot := SlotId{

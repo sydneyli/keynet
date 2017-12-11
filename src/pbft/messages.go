@@ -100,6 +100,16 @@ type CheckpointProof struct {
 	Proof    map[NodeId]SignedCheckpoint
 }
 
+type CheckpointProofMessage struct {
+	Proof CheckpointProof
+	Node  NodeId
+}
+
+type SignedCheckpointProof struct {
+	Message   CheckpointProofMessage
+	Signature []byte
+}
+
 type PreparedProof struct {
 	Number        SlotId
 	Preprepare    SignedPrePrepare

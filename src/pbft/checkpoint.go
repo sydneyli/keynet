@@ -45,25 +45,19 @@ func (n *PBFTNode) isStable(checkpoint *Checkpoint) bool {
 		len(info.Proof) >= 2*(len(n.peermap)/3)+1
 }
 
-func (n *PBFTNode) handleCheckpointProof(proof *CheckpointProof) {
+func (n *PBFTNode) handleCheckpointProof(proof *SignedCheckpointProof) {
 	if n.timeoutTimer != nil {
 		n.timeoutTimer.Reset(n.getTimeout())
 	}
-	n.checkpointed(*proof)
-	// if lastCHeckpoint
-	// if n.isStable(checkpoint) {
-	// 	return
-	// }
-	// if _, ok := n.pendingCheckpoints[checkpoint.Number]; !ok {
-	// 	n.pendingCheckpoints[checkpoint.Number] = checkpointInfo{
-	// 		number: checkpoint.Number,
-	// 		proof:  make(map[NodeId]Checkpoint),
-	// 	}
-	// }
-	// n.pendingCheckpoints[checkpoint.Number].proof[checkpoint.Node] = *checkpoint
-	// if n.isStable(checkpoint) {
-	// 	n.checkpointed(checkpoint.Number)
-	// }
+	sender, err := proof.SignatureValid(n.peerEntities, n.peerEntityMap)
+	if err != nil {
+		n.Log("Validating CheckpointProof signature: " + err.Error())
+		return
+	} else if sender != proof.Message.Node {
+		n.Log("Error: received CheckpointProof not signed by correct sending node")
+		return
+	}
+	n.checkpointed(proof.Message.Proof)
 }
 
 func (n *PBFTNode) handleCheckpoint(message *SignedCheckpoint) {
@@ -146,11 +140,18 @@ func (n PBFTNode) Checkpoint(req *SignedCheckpoint, res *Ack) error {
 	return nil
 }
 
-func (n PBFTNode) CheckpointProof(req *CheckpointProof, res *PPResponse) error {
+func (n PBFTNode) CheckpointProof(req *SignedCheckpointProof, res *SignedPPResponse) error {
 	if n.down {
 		return errors.New("I'm down")
 	}
 	n.checkpointProofChannel <- req
-	res.SeqNumber = n.sequenceNumber
+
+	res.Response.SeqNumber = n.sequenceNumber
+	sig, err := res.Response.GetSignature(n.entity)
+	if err != nil {
+		return err
+	}
+	res.Signature = sig
+
 	return nil
 }
