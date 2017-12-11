@@ -113,7 +113,6 @@ type SignedCheckpointProof struct {
 type PreparedProof struct {
 	Number        SlotId
 	Preprepare    SignedPrePrepare
-	Request       string
 	RequestDigest [sha256.Size]byte
 	Prepares      map[NodeId]SignedPrepare
 }

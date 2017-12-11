@@ -118,7 +118,6 @@ func (n *PBFTNode) generateProofsSinceCheckpoint() map[SlotId]PreparedProof {
 		if n.lastCheckpoint.Number.Before(id) && n.isPrepared(slot) {
 			proofs[id] = PreparedProof{
 				Number:        id,
-				Request:       *slot.request,
 				RequestDigest: slot.requestDigest,
 				Preprepare:    *slot.preprepare,
 				Prepares:      slot.prepares,
@@ -223,7 +222,6 @@ func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]FullPrePre
 			reqInfo := requestView{
 				view:          num.ViewNumber,
 				requestDigest: prepareproof.RequestDigest,
-				request:       prepareproof.Request,
 			}
 			if prevReqInfo, ok := seqNums[num.SeqNumber]; ok {
 				// if it exists, only replace if this one has a higher viewnum
