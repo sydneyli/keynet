@@ -439,10 +439,11 @@ func (n *PBFTNode) handlePrePrepare(preprepare *FullPrePrepare) {
 	}
 
 	sendingNode, err := preprepare.SignedMessage.SignatureValid(n.peerEntities, n.peerEntityMap)
+	sameView := preprepare.SignedMessage.PrePrepareMessage.Number.ViewNumber == n.viewNumber
 	if err != nil {
 		n.Log("Validating PrePrepare signature: " + err.Error())
 		return
-	} else if primaryNode, _ := n.getPrimary(); sendingNode != primaryNode {
+	} else if primaryNode, _ := n.getPrimary(); sameView && sendingNode != primaryNode {
 		n.Log("Error: received PrePrepare not signed by current primary")
 		return
 	}
@@ -696,7 +697,8 @@ func (n *PBFTNode) sendHeartbeat() {
 		n.caughtUpMux.RUnlock()
 		if caughtUp == 0 {
 			rpcType = "PBFTNode.NewView"
-			signedMessage, err := n.newView.Sign(n.entity)
+			newViewMessage := *n.newView
+			signedMessage, err := newViewMessage.Sign(n.entity)
 			if err != nil {
 				n.Log("Signing NewView heartbeat: " + err.Error())
 				return
