@@ -88,17 +88,27 @@ func (n *PBFTNode) handleViewChange(message *SignedViewChange) {
 	}
 }
 
-func (n *PBFTNode) handleNewView(message *NewView) {
+func (n *PBFTNode) handleNewView(message *SignedNewView) {
 	// Paper: section 4.4
 	// A backup accepts a new-view message for view v+1 if it is signed
 	// properly, if the view-change messages it contains are valid for view v+1,
 	// and if the set O is correct. It multicasts prepares for each
 	// message in O, and enters view + 1
+	sender, err := message.SignatureValid(n.peerEntities, n.peerEntityMap)
+	if err != nil {
+		n.Log("Validating NewView signature: " + err.Error())
+		return
+	} else if sender != message.Message.Node {
+		n.Log("Error: received NewView not signed by correct sending node")
+		return
+	}
+
 	var currentView int
+	newViewMessage := message.Message
 	if n.viewChange.inProgress {
-		if message.ViewNumber == n.viewChange.viewNumber {
-			n.enterNewView(message.ViewNumber)
-			for _, preprepare := range message.PrePrepares {
+		if newViewMessage.ViewNumber == n.viewChange.viewNumber {
+			n.enterNewView(newViewMessage.ViewNumber)
+			for _, preprepare := range newViewMessage.PrePrepares {
 				if preprepare.SignedMessage.PrePrepareMessage.Number.SeqNumber > n.sequenceNumber {
 					n.handlePrePrepare(&preprepare)
 				}
@@ -110,11 +120,11 @@ func (n *PBFTNode) handleNewView(message *NewView) {
 		currentView = n.viewNumber
 	}
 	// TODO: validate everything correctly
-	if message.ViewNumber > currentView {
+	if newViewMessage.ViewNumber > currentView {
 		// Multicast prepares for each message in O
 		// and enter view + 1
-		n.enterNewView(message.ViewNumber)
-		for _, preprepare := range message.PrePrepares {
+		n.enterNewView(newViewMessage.ViewNumber)
+		for _, preprepare := range newViewMessage.PrePrepares {
 			if preprepare.SignedMessage.PrePrepareMessage.Number.SeqNumber > n.sequenceNumber {
 				n.handlePrePrepare(&preprepare)
 			}
@@ -194,7 +204,7 @@ func (n PBFTNode) ViewChange(req *SignedViewChange, res *Ack) error {
 	return nil
 }
 
-func (n PBFTNode) NewView(req *NewView, res *Ack) error {
+func (n PBFTNode) NewView(req *SignedNewView, res *Ack) error {
 	if n.down {
 		return errors.New("I'm down")
 	}

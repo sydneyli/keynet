@@ -173,7 +173,7 @@ func (m *PreparedProofMap) UnmarshalJSON(b []byte) error {
 		return err
 	}
 
-	var resultMap PreparedProofMap
+	resultMap := make(PreparedProofMap)
 	for k, v := range strMap {
 		s := strings.Split(k, ":")
 		if len(s) != 2 {
@@ -198,7 +198,7 @@ func (m *PreparedProofMap) UnmarshalJSON(b []byte) error {
 }
 
 func (m PreparedProofMap) MarshalJSON() ([]byte, error) {
-	var strMap map[string]PreparedProof
+	strMap := make(map[string]PreparedProof)
 	for k, v := range m {
 		strMap[string(k.ViewNumber)+":"+string(k.SeqNumber)] = v
 	}
@@ -219,9 +219,55 @@ type SignedViewChange struct {
 type NewView struct {
 	ViewNumber  int                         // v + 1
 	ViewChanges map[NodeId]SignedViewChange // V
-	PrePrepares map[SlotId]FullPrePrepare   // O
+	PrePrepares NewViewPrePrepareMap        // O
 	Node        NodeId                      // i
-	Digest      [sha256.Size]byte
+}
+
+type SignedNewView struct {
+	Message   NewView
+	Signature []byte
+}
+
+// more JSON trickery
+type NewViewPrePrepareMap map[SlotId]FullPrePrepare
+
+func (m *NewViewPrePrepareMap) UnmarshalJSON(b []byte) error {
+	var strMap map[string]FullPrePrepare
+	if err := json.Unmarshal(b, &strMap); err != nil {
+		return err
+	}
+
+	resultMap := make(NewViewPrePrepareMap)
+	for k, v := range strMap {
+		s := strings.Split(k, ":")
+		if len(s) != 2 {
+			return errors.New("Unmarshalling JSON NewViewPrePrepareMap: invalid key")
+		}
+
+		view, err := strconv.Atoi(s[0])
+		if err != nil {
+			return err
+		}
+
+		seq, err := strconv.Atoi(s[1])
+
+		resultMap[SlotId{
+			ViewNumber: view,
+			SeqNumber:  seq,
+		}] = v
+	}
+
+	*m = resultMap
+	return nil
+}
+
+func (m NewViewPrePrepareMap) MarshalJSON() ([]byte, error) {
+	strMap := make(map[string]FullPrePrepare)
+	for k, v := range m {
+		strMap[string(k.ViewNumber)+":"+string(k.SeqNumber)] = v
+	}
+
+	return json.Marshal(strMap)
 }
 
 type Ack struct {

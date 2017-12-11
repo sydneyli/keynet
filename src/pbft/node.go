@@ -41,7 +41,7 @@ type PBFTNode struct {
 	checkpointProofChannel chan *SignedCheckpointProof
 	commitChannel          chan *SignedCommit
 	viewChangeChannel      chan *SignedViewChange
-	newViewChannel         chan *NewView
+	newViewChannel         chan *SignedNewView
 	requestTimeoutChannel  chan bool
 
 	// CLIENT CHANNELS.
@@ -210,7 +210,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		checkpointChannel:      make(chan *SignedCheckpoint),
 		checkpointProofChannel: make(chan *SignedCheckpointProof),
 		viewChangeChannel:      make(chan *SignedViewChange),
-		newViewChannel:         make(chan *NewView),
+		newViewChannel:         make(chan *SignedNewView),
 		requestTimeoutChannel:  make(chan bool),
 		requests:               make(map[[sha256.Size]byte]requestInfo),
 		log:                    make(map[SlotId]*Slot),
@@ -696,7 +696,12 @@ func (n *PBFTNode) sendHeartbeat() {
 		n.caughtUpMux.RUnlock()
 		if caughtUp == 0 {
 			rpcType = "PBFTNode.NewView"
-			msg = n.newView
+			signedMessage, err := n.newView.Sign(n.entity)
+			if err != nil {
+				n.Log("Signing NewView heartbeat: " + err.Error())
+				return
+			}
+			msg = signedMessage
 			after = func(id NodeId, response SignedPPResponse, err error) {
 				if err == nil {
 					n.caughtUpMux.Lock()
