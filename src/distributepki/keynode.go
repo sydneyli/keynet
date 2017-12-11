@@ -2,27 +2,51 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"distributepki/clientapi"
 	"distributepki/keystore"
 	"distributepki/util"
 	"encoding/gob"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 	"pbft"
+	"sync"
 	"time"
 
 	"github.com/coreos/pkg/capnslog"
 )
 
-var (
-	plog = capnslog.NewPackageLogger("github.com/sydli/distributePKI", "keynode")
-)
+type KeyRequest struct {
+	op     *clientapi.KeyOperation
+	writer *http.ResponseWriter
+}
 
 type KeyNode struct {
-	consensusNode *pbft.PBFTNode
-	store         *keystore.Keystore
+	consensusNode   *pbft.PBFTNode
+	store           *keystore.Keystore
+	pendingRequests *sync.Map
+	logger          *capnslog.PackageLogger
+}
+
+func SpawnKeyNode(config pbft.NodeConfig, cluster *pbft.ClusterConfig, store *keystore.Keystore) *KeyNode {
+	node := pbft.StartNode(config, *cluster)
+	if node == nil {
+		return nil
+	}
+
+	keyNode := KeyNode{
+		consensusNode:   node,
+		store:           store,
+		pendingRequests: &sync.Map{},
+		logger:          capnslog.NewPackageLogger("github.com/sydli/distributePKI", fmt.Sprintf("Keynode [Node %v]", node.Id())),
+	}
+
+	go keyNode.handleUpdates()
+	go keyNode.serveKeyRequests()
+	return &keyNode
 }
 
 func (kn *KeyNode) serveKeyRequests() {
@@ -38,35 +62,40 @@ func (kn *KeyNode) serveKeyRequests() {
 	}
 }
 
-func (kn *KeyNode) testPropose() {
-	alias := keystore.Alias("testalias")
-	<-time.NewTimer(time.Second * 2).C
+// func (kn *KeyNode) testPropose() {
+// 	alias := keystore.Alias("testalias")
+// 	<-time.NewTimer(time.Second * 2).C
 
-	op := clientapi.KeyOperation{
-		OpCode: clientapi.OP_CREATE,
-		Op:     clientapi.Create{alias, keystore.Key("testkey"), time.Now(), nil},
-	}
-	op.SetDigest()
+// 	op := clientapi.KeyOperation{
+// 		OpCode: clientapi.OP_CREATE,
+// 		Op:     clientapi.Create{alias, keystore.Key("testkey"), time.Now(), nil},
+// 	}
+// 	op.SetDigest()
 
-	kn.CreateKey(&op, nil)
-	<-time.NewTimer(time.Second * 2).C
+// 	kn.CreateKey(&op, nil)
+// 	<-time.NewTimer(time.Second * 2).C
 
-	lookup := clientapi.KeyOperation{
-		OpCode: clientapi.OP_LOOKUP,
-		Op:     clientapi.Lookup{alias, time.Now(), nil},
-	}
-	lookup.SetDigest()
+// 	lookup := clientapi.KeyOperation{
+// 		OpCode: clientapi.OP_LOOKUP,
+// 		Op:     clientapi.Lookup{alias, time.Now(), nil},
+// 	}
+// 	lookup.SetDigest()
 
-	if found, key := kn.LookupKey(&lookup, nil); found {
-		plog.Infof("Lookup got key: %v for alias %v", key, alias)
-	} else {
-		plog.Infof("Lookup key failed for alias %v", alias)
-	}
-}
+// 	if found, key := kn.LookupKey(&lookup, nil); found {
+// 		kn.logger.Infof("Lookup got key: %v for alias %v", key, alias)
+// 	} else {
+// 		kn.logger.Infof("Lookup key failed for alias %v", alias)
+// 	}
+// }
 
 // is there a better way to bind this variable to the inner fn...?
 func handlerWithContext(kn *KeyNode) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if kn.consensusNode.Down() {
+			kn.logger.Info("I'm down")
+			return
+		}
+
 		switch r.Method {
 
 		// TODO: have client send signed KeyOperations directly, rather than generating them here
@@ -75,67 +104,133 @@ func handlerWithContext(kn *KeyNode) func(http.ResponseWriter, *http.Request) {
 			alias := keystore.Alias(r.URL.Query().Get("name"))
 			op := clientapi.KeyOperation{
 				OpCode: clientapi.OP_LOOKUP,
-				Op:     clientapi.Lookup{alias, time.Now(), nil},
+				Op:     clientapi.Lookup{alias, nil},
 			}
 			op.SetDigest()
 
 			if found, key := kn.LookupKey(&op, nil); found {
 				response = key
 			} else {
-				http.Error(w, "Key not found", http.StatusBadRequest)
+				http.Error(w, "Key not found", http.StatusNotFound)
+				return
 			}
 			jsonBody, err := json.Marshal(response)
 			if err != nil {
 				http.Error(w, "Error converting results to json",
 					http.StatusInternalServerError)
+				return
 			}
 			w.Write(jsonBody)
 		case "POST":
-			alias := keystore.Alias(r.URL.Query().Get("name"))
-			keybytes, err := ioutil.ReadAll(r.Body)
+			bodyData, err := ioutil.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "Error reading body.", http.StatusInternalServerError)
+				return
+			}
+
+			createJSON := clientapi.CreateJSON{}
+			err = json.Unmarshal(bodyData, &createJSON)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			var create clientapi.Create
+			create, err = createJSON.ToCreate()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			op := clientapi.KeyOperation{
+				OpCode: clientapi.OP_CREATE,
+				Op:     create,
+			}
+			op.SetDigest()
+			if error := kn.CreateKey(&op, nil); error == nil {
+				kn.waitForCommit(&op, &w)
+			} else {
+				http.Error(w, error.Error(), http.StatusBadRequest)
+				return
+			}
+		case "PUT":
+			bodyData, err := ioutil.ReadAll(r.Body)
 			if err != nil {
 				http.Error(w, "Error reading key.", http.StatusInternalServerError)
 				return
 			}
-			key := keystore.Key(string(keybytes[:]))
+
+			updateJSON := clientapi.UpdateJSON{}
+			err = json.Unmarshal(bodyData, &updateJSON)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
+			var update clientapi.Update
+			update, err = updateJSON.ToUpdate()
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+
 			op := clientapi.KeyOperation{
-				OpCode: clientapi.OP_CREATE,
-				Op:     clientapi.Create{alias, key, time.Now(), nil},
+				OpCode: clientapi.OP_UPDATE,
+				Op:     update,
 			}
 			op.SetDigest()
-
-			kn.CreateKey(&op, nil)
-			response := "Key creation submitted."
-			jsonBody, err := json.Marshal(response)
-			if err != nil {
-				http.Error(w, "Error converting results to json",
-					http.StatusInternalServerError)
+			if error := kn.UpdateKey(&op, nil); error == nil {
+				kn.waitForCommit(&op, &w)
+			} else {
+				http.Error(w, error.Error(), http.StatusBadRequest)
+				return
 			}
-			w.Write(jsonBody)
 		}
 	}
 }
 
-func (kn *KeyNode) StartClientServer(rpcPort int) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", handlerWithContext(kn))
-	log.Fatal(http.ListenAndServe(util.GetHostname("", rpcPort), mux))
+func (kn *KeyNode) waitForCommit(op *clientapi.KeyOperation, w *http.ResponseWriter) {
+	responseChan := make(chan string)
+	kn.pendingRequests.Store(op.Digest, responseChan)
+	kn.logger.Infof("Store pending request with digest: %v", op.Digest)
+
+	var error string
+	select {
+	case error = <-responseChan:
+	case <-time.After(time.Second * 10):
+		error = "Timeout on wait for Commit"
+	}
+
+	if error == "" {
+		writeJSON("", w)
+	} else {
+		http.Error(*w, error, http.StatusInternalServerError)
+	}
+	kn.pendingRequests.Delete(op.Digest)
 }
 
-func SpawnKeyNode(config pbft.NodeConfig, cluster *pbft.ClusterConfig, store *keystore.Keystore) *KeyNode {
-	node := pbft.StartNode(config, *cluster)
-	if node == nil {
-		return nil
+func writeJSON(msg string, w *http.ResponseWriter) {
+	if jsonBody, err := json.Marshal(msg); err == nil {
+		(*w).Write(jsonBody)
+	} else {
+		http.Error(*w, "Error converting results to json",
+			http.StatusInternalServerError)
 	}
+}
 
-	keyNode := KeyNode{
-		consensusNode: node,
-		store:         store,
+func (kn *KeyNode) respondPendingRequest(digest [sha256.Size]byte, response string) {
+	if request, ok := kn.pendingRequests.Load(digest); !ok {
+		kn.logger.Debugf("No corresponding http request for operation digest %v", digest)
+		return
+	} else {
+		request.(chan string) <- response
 	}
+}
 
-	go keyNode.handleUpdates()
-	go keyNode.serveKeyRequests()
-	return &keyNode
+func (kn *KeyNode) StartClientServer(httpPort int) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", handlerWithContext(kn))
+	log.Fatal(http.ListenAndServe(util.GetHostname("", httpPort), mux))
 }
 
 func (kn *KeyNode) handleUpdates() {
@@ -154,7 +249,7 @@ func (kn *KeyNode) handleUpdates() {
 func (kn *KeyNode) handleSnapshotRequest(slot pbft.SlotId) {
 	snapshot, err := kn.store.GetSnapshot()
 	if err != nil {
-		plog.Errorf("oh no, couldnt snapshot")
+		kn.logger.Errorf("oh no, couldnt snapshot")
 	}
 	kn.consensusNode.SnapshotReply(slot, snapshot)
 }
@@ -164,11 +259,11 @@ func (kn *KeyNode) handleSnapshot(snapshot *[]byte) {
 	// var keyOp clientapi.KeyOperation
 	// err := gob.NewDecoder(bytes.NewReader([]byte(*operation))).Decode(&keyOp)
 	// if err != nil {
-	// 	plog.Error(err)
+	// 	kn.logger.Error(err)
 	// 	return
 	// }
 
-	// plog.Infof("Commit operation: %+v", keyOp)
+	// kn.logger.Infof("Commit operation: %+v", keyOp)
 
 	// // XXX: do we need to check the signature of the operation again here?
 	// // Or do we assume that since it's committed and we're a non-faulty
@@ -177,18 +272,18 @@ func (kn *KeyNode) handleSnapshot(snapshot *[]byte) {
 	// case clientapi.OP_CREATE:
 	// 	create, ok := keyOp.Op.(clientapi.Create)
 	// 	if !ok {
-	// 		plog.Error("Operation not a Create (handleCommit)")
+	// 		kn.logger.Error("Operation not a Create (handleCommit)")
 	// 		return
 	// 	}
-	// 	plog.Infof("Commit create to keystore: %v", create)
+	// 	kn.logger.Infof("Commit create to keystore: %v", create)
 	// 	kn.store.CreateKey(create.Alias, create.Key)
 	// case clientapi.OP_UPDATE:
 	// 	update, ok := keyOp.Op.(clientapi.Update)
 	// 	if !ok {
-	// 		plog.Error("Operation not a Update (handleCommit)")
+	// 		kn.logger.Error("Operation not a Update (handleCommit)")
 	// 		return
 	// 	}
-	// 	plog.Infof("Commit update to keystore: %v", update)
+	// 	kn.logger.Infof("Commit update to keystore: %v", update)
 	// 	// TODO: Update keystore
 	// }
 }
@@ -201,7 +296,8 @@ func (kn *KeyNode) handleCommit(operation *string) {
 	var keyOp clientapi.KeyOperation
 	err := gob.NewDecoder(bytes.NewReader([]byte(*operation))).Decode(&keyOp)
 	if err != nil {
-		plog.Error(err)
+		kn.logger.Error(err)
+		kn.respondPendingRequest(keyOp.Digest, err.Error())
 		return
 	}
 
@@ -212,20 +308,27 @@ func (kn *KeyNode) handleCommit(operation *string) {
 	case clientapi.OP_CREATE:
 		create, ok := keyOp.Op.(clientapi.Create)
 		if !ok {
-			plog.Error("Operation not a Create (handleCommit)")
+			error := "Operation not a Create (handleCommit)"
+			kn.logger.Error(error)
+			kn.respondPendingRequest(keyOp.Digest, error)
 			return
 		}
-		plog.Infof("Commit create to keystore: %v", create)
+		kn.logger.Infof("Commit create to keystore: %v", create)
 		kn.store.CreateKey(create.Alias, create.Key)
+
 	case clientapi.OP_UPDATE:
 		update, ok := keyOp.Op.(clientapi.Update)
 		if !ok {
-			plog.Error("Operation not a Update (handleCommit)")
+			error := "Operation not a Update (handleCommit)"
+			kn.logger.Error(error)
+			kn.respondPendingRequest(keyOp.Digest, error)
 			return
 		}
-		plog.Infof("Commit update to keystore: %v", update)
-		// TODO: Update keystore
+		kn.logger.Infof("Commit update to keystore: %v", update)
+		kn.store.UpdateKey(update.Alias, update.Key)
 	}
+
+	kn.respondPendingRequest(keyOp.Digest, "")
 }
 
 func (kn *KeyNode) CreateKey(args *clientapi.KeyOperation, reply *clientapi.Ack) error {
@@ -233,27 +336,34 @@ func (kn *KeyNode) CreateKey(args *clientapi.KeyOperation, reply *clientapi.Ack)
 	// TODO: verify operation signature
 	if !args.DigestValid() {
 		errMsg := "Operation digest is invalid (CreateKey)"
-		plog.Error(errMsg)
+		kn.logger.Error(errMsg)
 		return errors.New(errMsg)
 	}
 
 	if args.OpCode != clientapi.OP_CREATE {
 		errMsg := "Incorrect opcode value (CreateKey)"
-		plog.Error(errMsg)
+		kn.logger.Error(errMsg)
 		return errors.New(errMsg)
 	}
 
 	create, ok := args.Op.(clientapi.Create)
 	if !ok {
 		errMsg := "Operation not a Create (CreateKey)"
-		plog.Error(errMsg)
+		kn.logger.Error(errMsg)
 		return errors.New(errMsg)
 	}
-	plog.Infof("Create Key: %+v", create)
+
+	if ok, _ := kn.store.LookupKey((args.Op.(clientapi.Create)).Alias); ok {
+		errMsg := "Key already exists for user (CreateKey)"
+		kn.logger.Error(errMsg)
+		return errors.New(errMsg)
+	}
+
+	kn.logger.Infof("Create Key: %+v", create)
 
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(args); err != nil {
-		plog.Error(err)
+		kn.logger.Error(err)
 		return err
 	}
 
@@ -271,27 +381,34 @@ func (kn *KeyNode) UpdateKey(args *clientapi.KeyOperation, reply *clientapi.Ack)
 	// TODO: verify operation signature
 	if !args.DigestValid() {
 		errMsg := "Operation digest is invalid (UpdateKey)"
-		plog.Error(errMsg)
+		kn.logger.Error(errMsg)
 		return errors.New(errMsg)
 	}
 
 	if args.OpCode != clientapi.OP_UPDATE {
 		errMsg := "Incorrect opcode value (UpdateKey)"
-		plog.Error(errMsg)
+		kn.logger.Error(errMsg)
 		return errors.New(errMsg)
 	}
 
 	update, ok := args.Op.(clientapi.Update)
 	if !ok {
 		errMsg := "Operation not an Update (UpdateKey)"
-		plog.Error(errMsg)
+		kn.logger.Error(errMsg)
 		return errors.New(errMsg)
 	}
-	plog.Infof("Update Key: %+v", update)
+
+	if ok, _ := kn.store.LookupKey((args.Op.(clientapi.Update)).Alias); !ok {
+		errMsg := "Key does not exist for user (UpdateKey)"
+		kn.logger.Error(errMsg)
+		return errors.New(errMsg)
+	}
+
+	kn.logger.Infof("Update Key: %+v", update)
 
 	var buf bytes.Buffer
 	if err := gob.NewEncoder(&buf).Encode(args); err != nil {
-		plog.Error(err)
+		kn.logger.Error(err)
 		return err
 	}
 
@@ -307,20 +424,20 @@ func (kn *KeyNode) UpdateKey(args *clientapi.KeyOperation, reply *clientapi.Ack)
 func (kn *KeyNode) LookupKey(args *clientapi.KeyOperation, reply *clientapi.Ack) (bool, keystore.Key) {
 	// TODO: verify operation signature
 	if !args.DigestValid() {
-		plog.Error("Operation digest is invalid (LookupKey)")
+		kn.logger.Error("Operation digest is invalid (LookupKey)")
 		return false, keystore.Key("")
 	}
 
 	if args.OpCode != clientapi.OP_LOOKUP {
-		plog.Error("Incorrect opcode value (LookupKey)")
+		kn.logger.Error("Incorrect opcode value (LookupKey)")
 		return false, keystore.Key("")
 	}
 
 	lookup, ok := args.Op.(clientapi.Lookup)
 	if !ok {
-		plog.Error("Operation not a Lookup (LookupKey)")
+		kn.logger.Error("Operation not a Lookup (LookupKey)")
 		return false, keystore.Key("")
 	}
-	plog.Infof("Lookup Key: %+v", lookup)
+	kn.logger.Infof("Lookup Key: %+v", lookup)
 	return kn.store.LookupKey(lookup.Alias)
 }

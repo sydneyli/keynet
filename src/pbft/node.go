@@ -202,7 +202,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		requestSnapshotChannel: make(chan SlotId),
 		errorChannel:           make(chan error),
 		requestChannel:         make(chan *string, 10), // some nice inherent rate limiting
-		recvSnapshotChannel:    make(chan snapshot),
+		recvSnapshotChannel:    make(chan snapshot, 1), // buffer to prevent deadlock
 		snapshottedChannel:     make(chan *[]byte),
 		preprepareChannel:      make(chan *FullPrePrepare),
 		prepareChannel:         make(chan *SignedPrepare),
@@ -761,6 +761,14 @@ func (n *PBFTNode) startTimers() {
 	} else {
 		n.timeoutTimer = time.NewTimer(n.getTimeout())
 	}
+}
+
+func (n PBFTNode) Id() NodeId {
+	return n.id
+}
+
+func (n PBFTNode) Down() bool {
+	return n.down
 }
 
 func (n PBFTNode) Failure() chan error {

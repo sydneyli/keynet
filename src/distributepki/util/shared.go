@@ -1,6 +1,8 @@
 package util
 
 import (
+	"fmt"
+
 	"github.com/coreos/pkg/capnslog"
 
 	"crypto/sha256"
@@ -20,7 +22,7 @@ func GetHostname(host string, port int) string {
 
 func SendRpc(hostName string, endpoint string, rpcFunction string, message interface{}, response interface{}, rpcRetries int, timeout time.Duration) error {
 	if timeout <= 0 {
-		timeout = 1000 * time.Millisecond
+		timeout = time.Second
 	}
 	rpcClient, err := rpc.DialHTTPPath("tcp", hostName, endpoint)
 	for nRetries := 0; err != nil && rpcRetries < nRetries; nRetries++ {
@@ -37,7 +39,7 @@ func SendRpc(hostName string, endpoint string, rpcFunction string, message inter
 			return result.Error
 		}
 	case <-time.After(timeout):
-		return errors.New("Timed out")
+		return errors.New(fmt.Sprintf("RPC Send %v to %v timed out", rpcFunction, hostName))
 	}
 	return nil
 

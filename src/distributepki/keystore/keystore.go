@@ -10,7 +10,7 @@ import (
 )
 
 var (
-	plog = capnslog.NewPackageLogger("github.com/sydli/distributePKI", "keystore")
+	plog = capnslog.NewPackageLogger("github.com/sydli/distributePKI", "Keystore")
 )
 
 type Alias string
@@ -74,7 +74,7 @@ func (ks *Keystore) CreateKey(alias Alias, key Key) error {
 	return nil
 }
 
-func (ks *Keystore) UpdateKey(alias Alias, update KeyUpdate) error {
+func (ks *Keystore) UpdateKey(alias Alias, key Key) error {
 	/*
 		var oldKey Key
 		if val, ok := ks.store.Get(string(alias)); !ok {
@@ -90,9 +90,10 @@ func (ks *Keystore) UpdateKey(alias Alias, update KeyUpdate) error {
 		plog.Infof("Update Alias: %v set Key: %v ", alias, update.key)
 		ks.store.Propose("Update", clientMessage)
 	*/
+	plog.Infof("Update key %v for alias %v", key, alias)
 	ks.mux.Lock()
 	defer ks.mux.Unlock()
-	(*ks.keys)[alias] = update.key
+	(*ks.keys)[alias] = key
 	return nil
 }
 
