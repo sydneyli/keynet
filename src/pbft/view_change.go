@@ -94,14 +94,16 @@ func (n *PBFTNode) handleNewView(message *SignedNewView) {
 	// properly, if the view-change messages it contains are valid for view v+1,
 	// and if the set O is correct. It multicasts prepares for each
 	// message in O, and enters view + 1
-	sender, err := message.SignatureValid(n.peerEntities, n.peerEntityMap)
-	if err != nil {
-		n.Log("Validating NewView signature: " + err.Error())
-		return
-	} else if sender != message.Message.Node {
-		n.Log("Error: received NewView not signed by correct sending node")
-		return
-	}
+	/*
+		sender, err := message.SignatureValid(n.peerEntities, n.peerEntityMap)
+		if err != nil {
+			n.Log("Validating NewView signature: " + err.Error())
+			return
+		} else if sender != message.Message.Node {
+			n.Log("Error: received NewView not signed by correct sending node")
+			return
+		}
+	*/
 
 	var currentView int
 	newViewMessage := message.Message

@@ -164,6 +164,7 @@ func TestCommitDuringViewChange(t *testing.T) {
 	startCluster(&cluster, shutdownSignal)
 }
 
+/*
 func TestBackupCatchesUp(t *testing.T) {
 	shutdownSignal := make(chan bool)
 	cluster := LoadConfig("cluster.json")
@@ -196,3 +197,4 @@ func TestConcurrentWrites(t *testing.T) {
 	}(&cluster, shutdownSignal)
 	startCluster(&cluster, shutdownSignal)
 }
+*/

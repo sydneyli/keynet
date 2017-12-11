@@ -697,7 +697,7 @@ func (n *PBFTNode) sendHeartbeat() {
 		n.caughtUpMux.RUnlock()
 		if caughtUp == 0 {
 			rpcType = "PBFTNode.NewView"
-			newViewMessage := *n.newView
+			var newViewMessage NewView = *n.newView
 			signedMessage, err := newViewMessage.Sign(n.entity)
 			if err != nil {
 				n.Log("Signing NewView heartbeat: " + err.Error())

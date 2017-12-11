@@ -28,6 +28,19 @@ func (cr *ClientReply) SetDigest() {
 	}
 }
 
+func (cr *ClientReply) DigestValid() bool {
+	currentDigest := cr.digest
+	cr.digest = [sha256.Size]byte{}
+	d, err := cr.generateDigest()
+	if err != nil {
+		plog.Fatal("Error calculating ClientReply digest for validity")
+		return false
+	} else {
+		cr.digest = currentDigest
+		return d == currentDigest
+	}
+}
+
 // PrePrepare //
 
 func (pp *PrePrepare) Sign(node *openpgp.Entity) (*SignedPrePrepare, error) {
@@ -322,17 +335,4 @@ func (nv *SignedNewView) SignatureValid(peers openpgp.EntityList, peerMap map[En
 	}
 
 	return peerMap[signer.PrimaryKey.Fingerprint], nil
-}
-
-func (cr *ClientReply) DigestValid() bool {
-	currentDigest := cr.digest
-	cr.digest = [sha256.Size]byte{}
-	d, err := cr.generateDigest()
-	if err != nil {
-		plog.Fatal("Error calculating ClientReply digest for validity")
-		return false
-	} else {
-		cr.digest = currentDigest
-		return d == currentDigest
-	}
 }

@@ -217,10 +217,10 @@ type SignedViewChange struct {
 // O: a set of pre-prepare messages
 // (signed by node i)
 type NewView struct {
-	ViewNumber  int                         // v + 1
-	ViewChanges map[NodeId]SignedViewChange // V
-	PrePrepares NewViewPrePrepareMap        // O
-	Node        NodeId                      // i
+	ViewNumber  int                  // v + 1
+	ViewChanges NewViewViewChangeMap // V
+	PrePrepares NewViewPrePrepareMap // O
+	Node        NodeId               // i
 }
 
 type SignedNewView struct {
@@ -230,6 +230,7 @@ type SignedNewView struct {
 
 // more JSON trickery
 type NewViewPrePrepareMap map[SlotId]FullPrePrepare
+type NewViewViewChangeMap map[NodeId]SignedViewChange
 
 func (m *NewViewPrePrepareMap) UnmarshalJSON(b []byte) error {
 	var strMap map[string]FullPrePrepare
@@ -265,6 +266,34 @@ func (m NewViewPrePrepareMap) MarshalJSON() ([]byte, error) {
 	strMap := make(map[string]FullPrePrepare)
 	for k, v := range m {
 		strMap[string(k.ViewNumber)+":"+string(k.SeqNumber)] = v
+	}
+
+	return json.Marshal(strMap)
+}
+
+func (m *NewViewViewChangeMap) UnmarshalJSON(b []byte) error {
+	var strMap map[string]SignedViewChange
+	if err := json.Unmarshal(b, &strMap); err != nil {
+		return err
+	}
+
+	resultMap := make(NewViewViewChangeMap)
+	for k, v := range strMap {
+		uintK, err := strconv.Atoi(k)
+		if err != nil {
+			return err
+		}
+		resultMap[NodeId(uintK)] = v
+	}
+
+	*m = resultMap
+	return nil
+}
+
+func (m NewViewViewChangeMap) MarshalJSON() ([]byte, error) {
+	strMap := make(map[string]SignedViewChange)
+	for k, v := range m {
+		strMap[string(k)] = v
 	}
 
 	return json.Marshal(strMap)

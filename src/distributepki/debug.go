@@ -59,14 +59,23 @@ func sendPbft(cluster *pbft.ClusterConfig, args []string, message pbft.DebugMess
 
 // TODO (sydli): clean up below code (get better at go)
 func doPut(cluster *pbft.ClusterConfig, node *pbft.NodeConfig, alias string, key string) string {
-	req, err := http.NewRequest("POST", "http://"+util.GetHostname(node.Host, node.ClientPort), bytes.NewBuffer([]byte(key)))
+	jsonStr := "{\"alias\": \"" + alias + "\", \"key\": \"" + key + "\", \"signature\": \"\", \"timestamp\": 0}"
+	req, err := http.NewRequest("POST", "http://"+util.GetHostname(node.Host, node.ClientPort), bytes.NewBuffer([]byte(jsonStr)))
 	if err != nil {
 		log.Print(err)
 		return ""
 	}
-	q := req.URL.Query()
-	q.Add("name", alias)
-	req.URL.RawQuery = q.Encode()
+	/*
+		type CreateJSON struct {
+			Alias     string
+			Key       string
+			Timestamp int64
+			Signature string
+		}
+	*/
+	//q := req.URL.Query()
+	//q.Add("name", alias)
+	//req.URL.RawQuery = q.Encode()
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
