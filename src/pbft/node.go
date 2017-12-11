@@ -36,7 +36,7 @@ type PBFTNode struct {
 	requestChannel         chan *string
 	recvSnapshotChannel    chan snapshot
 	preprepareChannel      chan *FullPrePrepare
-	prepareChannel         chan *Prepare
+	prepareChannel         chan *SignedPrepare
 	checkpointChannel      chan *Checkpoint
 	checkpointProofChannel chan *CheckpointProof
 	commitChannel          chan *Commit
@@ -205,7 +205,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		recvSnapshotChannel:    make(chan snapshot),
 		snapshottedChannel:     make(chan *[]byte),
 		preprepareChannel:      make(chan *FullPrePrepare),
-		prepareChannel:         make(chan *Prepare),
+		prepareChannel:         make(chan *SignedPrepare),
 		commitChannel:          make(chan *Commit),
 		checkpointChannel:      make(chan *Checkpoint),
 		checkpointProofChannel: make(chan *CheckpointProof),
@@ -278,7 +278,7 @@ func (n *PBFTNode) ensureMapping(num SlotId) *Slot {
 			request:       nil,
 			requestDigest: [sha256.Size]byte{},
 			preprepare:    nil,
-			prepares:      make(map[NodeId]Prepare),
+			prepares:      make(map[NodeId]SignedPrepare),
 			commits:       make(map[NodeId]*Commit),
 			prepared:      false,
 			committed:     false,
@@ -406,7 +406,7 @@ func (n *PBFTNode) handleClientRequest(request *string) {
 			request:       request,
 			requestDigest: requestDigest,
 			preprepare:    &fullMessage.SignedMessage,
-			prepares:      make(map[NodeId]Prepare),
+			prepares:      make(map[NodeId]SignedPrepare),
 			commits:       make(map[NodeId]*Commit),
 			prepared:      false,
 			committed:     false,
@@ -507,39 +507,47 @@ func (n *PBFTNode) handlePrePrepare(preprepare *FullPrePrepare) {
 		Number:        preprepareMessage.Number,
 		RequestDigest: preprepareMessage.RequestDigest,
 		Node:          n.id,
-		Digest:        [sha256.Size]byte{},
 	}
-	prepare.SetDigest()
+	signedMessage, err := prepare.Sign(n.entity)
+	if err != nil {
+		n.Log("Signing prepare: " + err.Error())
+		return
+	}
 
-	slot.prepares[n.id] = prepare
+	slot.prepares[n.id] = *signedMessage
 	n.log[preprepareMessage.Number].preprepare = &preprepare.SignedMessage
-	go n.broadcast("PBFTNode.Prepare", prepare, 0)
+	go n.broadcast("PBFTNode.Prepare", signedMessage, 0)
 }
 
-func (n *PBFTNode) handlePrepare(message *Prepare) {
+func (n *PBFTNode) handlePrepare(message *SignedPrepare) {
 	if n.viewChange.inProgress {
 		return
 	}
 
-	if !message.DigestValid() {
-		n.Log("Error: Prepare digest does not match data")
+	sender, err := message.SignatureValid(n.peerEntities, n.peerEntityMap)
+	if err != nil {
+		n.Log("Validating Prepare signature: " + err.Error())
+		return
+	} else if sender != message.PrepareMessage.Node {
+		n.Log("Error: received Prepare not signed by correct sending node")
 		return
 	}
 
-	slot := n.ensureMapping(message.Number)
-	if slot.request != nil && slot.requestDigest != message.RequestDigest {
-		plog.Errorf("Received prepare for slot id %+v with mismatched digest.", message.Number)
+	prepare := message.PrepareMessage
+	slot := n.ensureMapping(prepare.Number)
+	if slot.request != nil && slot.requestDigest != prepare.RequestDigest {
+		plog.Errorf("Received prepare for slot id %+v with mismatched digest.", prepare.Number)
 	}
-	slot.prepares[message.Node] = *message
+	slot.prepares[prepare.Node] = *message
 
-	n.log[message.Number] = slot
+	n.log[prepare.Number] = slot
 	if n.isPrepared(slot) {
-		n.Log("PREPARED %+v", message.Number)
+		n.Log("PREPARED %+v", prepare.Number)
 		slot.prepared = true
 
 		commit := Commit{
-			Number:        message.Number,
-			RequestDigest: message.RequestDigest,
+			Number:        prepare.Number,
+			RequestDigest: prepare.RequestDigest,
 			Node:          n.id,
 			Digest:        [sha256.Size]byte{},
 		}
@@ -554,10 +562,14 @@ func (n *PBFTNode) handleCommit(message *Commit) {
 		return
 	}
 
-	if !message.DigestValid() {
-		n.Log("Error: Commit digest does not match data")
-		return
-	}
+	/*
+		sender, err := message.SignedMessage.SignatureValid(n.peerEntities, n.peerEntityMap)
+		if err != nil {
+			n.Log("Validating Prepare signature: " + err.Error())
+			return
+		}
+	*/
+
 	if message.Number.Before(n.lastCheckpoint.Number) {
 		return
 	}
@@ -767,7 +779,7 @@ func (n PBFTNode) PrePrepare(req *FullPrePrepare, res *SignedPPResponse) error {
 	return nil
 }
 
-func (n PBFTNode) Prepare(req *Prepare, res *Ack) error {
+func (n PBFTNode) Prepare(req *SignedPrepare, res *Ack) error {
 	if n.down {
 		return errors.New("I'm down")
 	}

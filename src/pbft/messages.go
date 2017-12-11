@@ -53,7 +53,11 @@ type Prepare struct {
 	Number        SlotId
 	RequestDigest [sha256.Size]byte
 	Node          NodeId
-	Digest        [sha256.Size]byte
+}
+
+type SignedPrepare struct {
+	PrepareMessage Prepare
+	Signature      []byte
 }
 
 // COMMIT:
@@ -93,7 +97,7 @@ type PreparedProof struct {
 	Preprepare    SignedPrePrepare
 	Request       string
 	RequestDigest [sha256.Size]byte
-	Prepares      map[NodeId]Prepare
+	Prepares      map[NodeId]SignedPrepare
 }
 
 // VIEW CHANGE:
