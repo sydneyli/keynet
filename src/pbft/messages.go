@@ -2,7 +2,11 @@ package pbft
 
 import (
 	"crypto/sha256"
+	"encoding/json"
+	"errors"
 	"net"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -124,16 +128,87 @@ type PreparedProof struct {
 //    1 Preprepare message (signed) and 2f+1 prepares per
 // (signed by node i)
 type ViewChange struct {
-	ViewNumber      int                         // v + 1
-	Checkpoint      SlotId                      // n
-	CheckpointProof map[NodeId]SignedCheckpoint // C
-	Proofs          map[SlotId]PreparedProof    // P
-	Node            NodeId                      // i
-	Digest          [sha256.Size]byte
+	ViewNumber      int                // v + 1
+	Checkpoint      SlotId             // n
+	CheckpointProof CheckpointProofMap // C
+	Proofs          PreparedProofMap   // P
+	Node            NodeId             // i
 }
 
-func (v ViewChange) verify() bool {
-	return true
+// random JSON serialization workarounds
+type CheckpointProofMap map[NodeId]SignedCheckpoint
+type PreparedProofMap map[SlotId]PreparedProof
+
+func (m *CheckpointProofMap) UnmarshalJSON(b []byte) error {
+	var strMap map[string]SignedCheckpoint
+	if err := json.Unmarshal(b, &strMap); err != nil {
+		return err
+	}
+
+	resultMap := make(CheckpointProofMap)
+	for k, v := range strMap {
+		uintK, err := strconv.Atoi(k)
+		if err != nil {
+			return err
+		}
+		resultMap[NodeId(uintK)] = v
+	}
+
+	*m = resultMap
+	return nil
+}
+
+func (m CheckpointProofMap) MarshalJSON() ([]byte, error) {
+	strMap := make(map[string]SignedCheckpoint)
+	for k, v := range m {
+		strMap[string(k)] = v
+	}
+
+	return json.Marshal(strMap)
+}
+
+func (m *PreparedProofMap) UnmarshalJSON(b []byte) error {
+	var strMap map[string]PreparedProof
+	if err := json.Unmarshal(b, &strMap); err != nil {
+		return err
+	}
+
+	var resultMap PreparedProofMap
+	for k, v := range strMap {
+		s := strings.Split(k, ":")
+		if len(s) != 2 {
+			return errors.New("Unmarshalling JSON PreparedProofMap: invalid key")
+		}
+
+		view, err := strconv.Atoi(s[0])
+		if err != nil {
+			return err
+		}
+
+		seq, err := strconv.Atoi(s[1])
+
+		resultMap[SlotId{
+			ViewNumber: view,
+			SeqNumber:  seq,
+		}] = v
+	}
+
+	*m = resultMap
+	return nil
+}
+
+func (m PreparedProofMap) MarshalJSON() ([]byte, error) {
+	var strMap map[string]PreparedProof
+	for k, v := range m {
+		strMap[string(k.ViewNumber)+":"+string(k.SeqNumber)] = v
+	}
+
+	return json.Marshal(strMap)
+}
+
+type SignedViewChange struct {
+	Message   ViewChange
+	Signature []byte
 }
 
 // NEW VIEW
@@ -142,18 +217,11 @@ func (v ViewChange) verify() bool {
 // O: a set of pre-prepare messages
 // (signed by node i)
 type NewView struct {
-	ViewNumber  int                       // v + 1
-	ViewChanges map[NodeId]ViewChange     // V
-	PrePrepares map[SlotId]FullPrePrepare // O
-	Node        NodeId                    // i
+	ViewNumber  int                         // v + 1
+	ViewChanges map[NodeId]SignedViewChange // V
+	PrePrepares map[SlotId]FullPrePrepare   // O
+	Node        NodeId                      // i
 	Digest      [sha256.Size]byte
-}
-
-// Backup verifies O, multicasts prepares for every message
-// in O, then enters new view.
-
-func (v NewView) verify() bool {
-	return true
 }
 
 type Ack struct {

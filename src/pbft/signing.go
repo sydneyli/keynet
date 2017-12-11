@@ -256,23 +256,38 @@ func (c *SignedCheckpointProof) SignatureValid(peers openpgp.EntityList, peerMap
 
 // ViewChange //
 
-func (vc *ViewChange) generateDigest() ([sha256.Size]byte, error) {
-	var buf bytes.Buffer
+func (vc *ViewChange) Sign(node *openpgp.Entity) (*SignedViewChange, error) {
+	var sig, buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(*vc); err != nil {
-		var empty [sha256.Size]byte
-		return empty, err
+		return nil, err
 	}
-	return sha256.Sum256(buf.Bytes()), nil
+
+	err := openpgp.DetachSign(&sig, node, &buf, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return &SignedViewChange{
+		Message:   *vc,
+		Signature: sig.Bytes(),
+	}, nil
 }
 
-func (vc *ViewChange) SetDigest() {
-	vc.Digest = [sha256.Size]byte{}
-	d, err := vc.generateDigest()
-	if err != nil {
-		plog.Fatal("Error setting ViewChange digest")
-	} else {
-		vc.Digest = d
+func (vc *SignedViewChange) SignatureValid(peers openpgp.EntityList, peerMap map[EntityFingerprint]NodeId) (NodeId, error) {
+	var buf, sig bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(vc.Message); err != nil {
+		return 0, err
 	}
+
+	if _, err := sig.Write(vc.Signature); err != nil {
+		return 0, err
+	}
+	signer, err := openpgp.CheckDetachedSignature(peers, &buf, &sig)
+	if err != nil {
+		return 0, err
+	}
+
+	return peerMap[signer.PrimaryKey.Fingerprint], nil
 }
 
 func (nv *NewView) generateDigest() ([sha256.Size]byte, error) {
@@ -303,19 +318,6 @@ func (cr *ClientReply) DigestValid() bool {
 		return false
 	} else {
 		cr.digest = currentDigest
-		return d == currentDigest
-	}
-}
-
-func (vc *ViewChange) DigestValid() bool {
-	currentDigest := vc.Digest
-	vc.Digest = [sha256.Size]byte{}
-	d, err := vc.generateDigest()
-	if err != nil {
-		plog.Fatal("Error calculating ViewChange digest for validity")
-		return false
-	} else {
-		vc.Digest = currentDigest
 		return d == currentDigest
 	}
 }

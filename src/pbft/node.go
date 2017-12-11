@@ -40,7 +40,7 @@ type PBFTNode struct {
 	checkpointChannel      chan *SignedCheckpoint
 	checkpointProofChannel chan *SignedCheckpointProof
 	commitChannel          chan *SignedCommit
-	viewChangeChannel      chan *ViewChange
+	viewChangeChannel      chan *SignedViewChange
 	newViewChannel         chan *NewView
 	requestTimeoutChannel  chan bool
 
@@ -121,7 +121,7 @@ type requestInfo struct {
 
 // Information associated with current view change.
 type viewChangeInfo struct {
-	messages   map[NodeId]ViewChange
+	messages   map[NodeId]SignedViewChange
 	inProgress bool
 	viewNumber int
 }
@@ -209,7 +209,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		commitChannel:          make(chan *SignedCommit),
 		checkpointChannel:      make(chan *SignedCheckpoint),
 		checkpointProofChannel: make(chan *SignedCheckpointProof),
-		viewChangeChannel:      make(chan *ViewChange),
+		viewChangeChannel:      make(chan *SignedViewChange),
 		newViewChannel:         make(chan *NewView),
 		requestTimeoutChannel:  make(chan bool),
 		requests:               make(map[[sha256.Size]byte]requestInfo),
@@ -217,7 +217,7 @@ func StartNode(host NodeConfig, cluster ClusterConfig) *PBFTNode {
 		viewNumber:             0,
 		sequenceNumber:         1,
 		issuedSequenceNumber:   1,
-		viewChange:             &viewChangeInfo{inProgress: false, viewNumber: 0, messages: make(map[NodeId]ViewChange)},
+		viewChange:             &viewChangeInfo{inProgress: false, viewNumber: 0, messages: make(map[NodeId]SignedViewChange)},
 		lastCheckpoint: CheckpointProof{
 			Number:   SlotId{ViewNumber: 0, SeqNumber: 0},
 			Snapshot: make([]byte, 0),

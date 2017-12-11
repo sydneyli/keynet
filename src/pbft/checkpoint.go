@@ -61,15 +61,20 @@ func (n *PBFTNode) handleCheckpointProof(proof *SignedCheckpointProof) {
 }
 
 func (n *PBFTNode) handleCheckpoint(message *SignedCheckpoint) {
-
 	sender, err := message.SignatureValid(n.peerEntities, n.peerEntityMap)
 	if err != nil {
-		n.Log("Validating Checkpoint signature: " + err.Error())
+		n.Log("Validating Checkpoint signature: %s", err.Error())
 		return
 	} else if sender != message.CheckpointMessage.Node {
 		n.Log("Error: received Checkpoint not signed by correct sending node")
 		return
 	}
+
+	n.handleCheckpointNoValidation(message)
+}
+
+// Checkpoint signed by ourselves bypasses signature verification
+func (n *PBFTNode) handleCheckpointNoValidation(message *SignedCheckpoint) {
 
 	checkpoint := message.CheckpointMessage
 	if n.isStable(&checkpoint) {
@@ -101,7 +106,7 @@ func (n *PBFTNode) handleRecvSnapshot(snap *snapshot) {
 		return
 	}
 
-	n.handleCheckpoint(signedCheckpoint)
+	n.handleCheckpointNoValidation(signedCheckpoint)
 	go n.broadcast("PBFTNode.Checkpoint", signedCheckpoint, 0)
 }
 
