@@ -35,9 +35,9 @@ type KeyNode struct {
 var keyring openpgp.EntityList
 
 func SpawnKeyNode(config pbft.NodeConfig, cluster *pbft.ClusterConfig, store *keystore.Keystore) *KeyNode {
-	// hook in mock authority~
+	// Hook in mock authority~
 	var err error
-	keyring, err = util.ReadPgpKeyFile("../mock_authority/keys/public.key")
+	keyring, err = util.ReadPgpKeyFile(cluster.AuthorityKeyFile)
 	if err != nil {
 		return nil
 	}
@@ -70,32 +70,6 @@ func (kn *KeyNode) serveKeyRequests() {
 		// }
 	}
 }
-
-// func (kn *KeyNode) testPropose() {
-// 	alias := keystore.Alias("testalias")
-// 	<-time.NewTimer(time.Second * 2).C
-
-// 	op := clientapi.KeyOperation{
-// 		OpCode: clientapi.OP_CREATE,
-// 		Op:     clientapi.Create{alias, keystore.Key("testkey"), time.Now(), nil},
-// 	}
-// 	op.SetDigest()
-
-// 	kn.CreateKey(&op, nil)
-// 	<-time.NewTimer(time.Second * 2).C
-
-// 	lookup := clientapi.KeyOperation{
-// 		OpCode: clientapi.OP_LOOKUP,
-// 		Op:     clientapi.Lookup{alias, time.Now(), nil},
-// 	}
-// 	lookup.SetDigest()
-
-// 	if found, key := kn.LookupKey(&lookup, nil); found {
-// 		kn.logger.Infof("Lookup got key: %v for alias %v", key, alias)
-// 	} else {
-// 		kn.logger.Infof("Lookup key failed for alias %v", alias)
-// 	}
-// }
 
 // is there a better way to bind this variable to the inner fn...?
 func handlerWithContext(kn *KeyNode) func(http.ResponseWriter, *http.Request) {
@@ -310,9 +284,6 @@ func (kn *KeyNode) handleCommit(operation *string) {
 		return
 	}
 
-	// XXX: do we need to check the signature of the operation again here?
-	// Or do we assume that since it's committed and we're a non-faulty
-	// node, we can apply it.
 	switch keyOp.OpCode {
 	case clientapi.OP_CREATE:
 		create, ok := keyOp.Op.(clientapi.Create)
@@ -322,7 +293,7 @@ func (kn *KeyNode) handleCommit(operation *string) {
 			kn.respondPendingRequest(keyOp.Digest, error)
 			return
 		}
-		kn.logger.Infof("Commit create to keystore: %v", create)
+		kn.logger.Info("Commiting create to keystore")
 		kn.store.CreateKey(create.Alias, create.Key)
 
 	case clientapi.OP_UPDATE:
@@ -333,7 +304,7 @@ func (kn *KeyNode) handleCommit(operation *string) {
 			kn.respondPendingRequest(keyOp.Digest, error)
 			return
 		}
-		kn.logger.Infof("Commit update to keystore: %v", update)
+		kn.logger.Info("Commiting update to keystore")
 		kn.store.UpdateKey(update.Alias, update.Key)
 	}
 

@@ -1,0 +1,8 @@
+{
+    "publickey": "keys/public.key",
+    "secretkey": "keys/private.key",
+    "secret": "keys/passphrase.txt",
+    "endpoint": "/sign",
+    "host": "localhost",
+    "port": 8080
+}

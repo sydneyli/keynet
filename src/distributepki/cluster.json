@@ -1,5 +1,6 @@
 {
     "endpoint": "pbft",
+    "authoritykeyfile": "../mock_authority/keys/public.key",
     "nodes": [
         {
             "id": 1,

@@ -1,12 +1,9 @@
 package main
 
 import (
-	"golang.org/x/crypto/openpgp"
-	// 	"golang.org/x/crypto/openpgp/armor"
 	"distributepki/util"
-	// 	"golang.org/x/crypto/openpgp/packet"
+	"golang.org/x/crypto/openpgp"
 
-	// "crypto/rsa"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -28,7 +25,26 @@ type keyMappingSigned struct {
 	Signature []byte
 }
 
+type authConfig struct {
+	PublicKey string
+	SecretKey string
+	Secret    string
+	Endpoint  string
+	Host      string
+	Port      int
+}
+
 var thisEntity *openpgp.Entity
+var config authConfig
+
+func LoadConfig(filename string) error {
+	configData, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(configData, &config)
+	return err
+}
 
 func handler(w http.ResponseWriter, r *http.Request) {
 	// 1. decode from json
@@ -67,8 +83,15 @@ func handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	err := LoadConfig("config.json")
+	if err != nil {
+		fmt.Println("Couldn't read config.json")
+		fmt.Println(err)
+		return
+	}
+
 	// 1. read in all the key info
-	hostEntityList, err := util.ReadPgpKeyFile("keys/private.key")
+	hostEntityList, err := util.ReadPgpKeyFile(config.SecretKey)
 	if err != nil {
 		fmt.Printf("reading private key: %s\n", err.Error())
 	} else if len(hostEntityList) != 1 {
@@ -77,7 +100,7 @@ func main() {
 	thisEntity = hostEntityList[0]
 	fmt.Printf("%d host primary key: %+v\n", len(hostEntityList), thisEntity.PrimaryKey)
 
-	phrase, err := ioutil.ReadFile("keys/passphrase.txt")
+	phrase, err := ioutil.ReadFile(config.Secret)
 	if err != nil {
 		fmt.Printf("reading passphrase: %s\n", err.Error())
 	}
@@ -89,6 +112,6 @@ func main() {
 	}
 
 	// 2. spin up server
-	http.HandleFunc("/sign", handler)
-	http.ListenAndServe(":8080", nil)
+	http.HandleFunc(config.Endpoint, handler)
+	http.ListenAndServe(fmt.Sprintf(":%d", config.Port), nil)
 }

@@ -17,8 +17,9 @@ type NodeId uint
 type EntityFingerprint [20]byte
 
 type ClusterConfig struct {
-	Endpoint string
-	Nodes    []NodeConfig
+	Nodes            []NodeConfig
+	AuthorityKeyFile string
+	Endpoint         string
 }
 
 func hash(data []byte) uint32 {

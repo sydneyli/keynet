@@ -59,15 +59,7 @@ func NewKeystore(initial *map[string]string) *Keystore {
 }
 
 func (ks *Keystore) CreateKey(alias Alias, key Key) error {
-	/*
-		if _, ok := ks.store.Get(string(alias)); ok {
-			return AliasAlreadyExists(alias)
-		}
-		// TODO: make sure that key is valid key format here
-		plog.Infof("Create Key: %v for Alias: %v", key, alias)
-		ks.store.Propose("Create", clientMessage)
-	*/
-	plog.Infof("Store key %v for alias %v", key, alias)
+	plog.Infof("Storing key for alias %v", alias)
 	ks.mux.Lock()
 	defer ks.mux.Unlock()
 	(*ks.keys)[alias] = key
@@ -75,22 +67,7 @@ func (ks *Keystore) CreateKey(alias Alias, key Key) error {
 }
 
 func (ks *Keystore) UpdateKey(alias Alias, key Key) error {
-	/*
-		var oldKey Key
-		if val, ok := ks.store.Get(string(alias)); !ok {
-			return AliasNotFoundError(alias)
-		} else {
-			oldKey = Key(val)
-		}
-
-		if !verifyKeyUpdate(update, oldKey) {
-			return SignatureMismatch{update, oldKey}
-		}
-
-		plog.Infof("Update Alias: %v set Key: %v ", alias, update.key)
-		ks.store.Propose("Update", clientMessage)
-	*/
-	plog.Infof("Update key %v for alias %v", key, alias)
+	plog.Infof("Updating key for alias %v", alias)
 	ks.mux.Lock()
 	defer ks.mux.Unlock()
 	(*ks.keys)[alias] = key
@@ -139,9 +116,4 @@ func (ks *Keystore) ApplySnapshot(snapshot *[]byte) error {
 	}
 	ks.keys = &keys
 	return nil
-}
-
-func verifyKeyUpdate(update KeyUpdate, oldKey Key) bool {
-	// TODO: check signature here using old key
-	return true
 }
