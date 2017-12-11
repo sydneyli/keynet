@@ -39,7 +39,6 @@ func handler(w http.ResponseWriter, r *http.Request) {
 	}
 	err := json.NewDecoder(r.Body).Decode(&toSign)
 	if err != nil {
-		res, _ := ioutil.ReadAll(r.Body)
 		http.Error(w, err.Error(), 400)
 		return
 	}
