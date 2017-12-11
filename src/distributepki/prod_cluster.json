@@ -7,35 +7,45 @@
             "host": "35.227.154.160",
             "port": 20000,
             "clientport": 9020,
-            "key": "85594f70f00df7308241b5d436d84b1c93b7151b54f7ba0e9cbc8631cc1174b5"
+            "publickeyfile": "public/node1.pub",
+            "privatekeyfile": "private/node1.key",
+            "passphrasefile": "private/passphrase.txt"
         },
         {
             "id": 2,
             "host": "35.197.92.99",
             "port": 20000,
             "clientport": 9020,
-            "key": "1290799ba2ba0ab661732d96f41bfbdab1fbd4f0b13a58d63c19ba2463669bb9"
+            "publickeyfile": "public/node2.pub",
+            "privatekeyfile": "private/node2.key",
+            "passphrasefile": "private/passphrase.txt"
         },
         {
             "id": 3,
             "host": "104.196.247.231",
             "port": 20000,
             "clientport": 9020,
-            "key": "47a64676b07601fc44b7b42491676c6ee9d8d1ad3f7f138e9cfbdfdfe9c71dd2"
+            "publickeyfile": "public/node3.pub",
+            "privatekeyfile": "private/node3.key",
+            "passphrasefile": "private/passphrase.txt"
         },
         {
             "id": 4,
             "host": "35.227.184.100",
             "port": 20000,
             "clientport": 9020,
-            "key": "d80a744b1304332463f6346175e3af33ad3e448fa18ace85208bb95a315b5c2d"
+            "publickeyfile": "public/node4.pub",
+            "privatekeyfile": "private/node4.key",
+            "passphrasefile": "private/passphrase.txt"
         },
         {
             "id": 5,
             "host": "35.203.162.2",
             "port": 20000,
             "clientport": 9020,
-            "key": "fffff770392759864bcf548117c0f9e1af43bf41d2ca6bd9378bce09f5d6c799"
+            "publickeyfile": "public/node5.pub",
+            "privatekeyfile": "private/node5.key",
+            "passphrasefile": "private/passphrase.txt"
         }
     ]
 }
