@@ -112,25 +112,33 @@ func (u Update) SignatureValid(previousKey keystore.Key) bool {
 		plog.Error("Couldn't read previous key!")
 		return false
 	}
-	for _, key := range keyring {
-		plog.Infof("%+v", key.PrimaryKey)
-	}
+	// for _, key := range keyring {
+	// 	plog.Infof("%+v", key.PrimaryKey)
+	// }
 	nosig := keyMapping{
 		Alias:     string(u.Alias),
 		Key:       string(u.Key),
 		Timestamp: u.Timestamp,
 	}
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(nosig); err != nil {
+
+	enc, error := json.Marshal(&nosig)
+	if error != nil {
 		plog.Error("Couldn't encode as json!")
 		return false
 	}
-	_, err := openpgp.CheckArmoredDetachedSignature(keyring, strings.NewReader("abcd"), strings.NewReader(string(u.Signature)))
+
+	// var buf bytes.Buffer
+	// if err := json.NewEncoder(&buf).Encode(nosig); err != nil {
+	// 	plog.Error("Couldn't encode as json!")
+	// 	return false
+	// }
+	_, err := openpgp.CheckArmoredDetachedSignature(keyring, strings.NewReader(string(enc)), strings.NewReader(string(u.Signature)))
 	if err != nil {
 		plog.Error(err)
 		plog.Error("Not signed by correct auth")
 		return false
 	}
+	plog.Info("SIGNATURE CHECK PASSED")
 	return true
 }
 
