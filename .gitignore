@@ -3,3 +3,5 @@ raftexample
 bin
 pkg
 github.com
+golang.org
+private/

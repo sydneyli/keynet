@@ -9,7 +9,18 @@ import (
 
 // ** VIEW CHANGES ** //
 
-func (n *PBFTNode) handleViewChange(message *ViewChange) {
+func (n *PBFTNode) handleViewChange(message *SignedViewChange) {
+
+	sender, err := message.SignatureValid(n.peerEntities, n.peerEntityMap)
+	if err != nil {
+		n.Log("Validating ViewChange signature: " + err.Error())
+		return
+	} else if sender != message.Message.Node {
+		n.Log("Error: received ViewChange not signed by correct sending node")
+		return
+	}
+
+	vc := message.Message
 	// Paper: section 4.5.2
 	// if a replica receives a set of f+1 valid view change messages
 	// from other replicas for views higher than its current view,
@@ -22,17 +33,17 @@ func (n *PBFTNode) handleViewChange(message *ViewChange) {
 		currentView = n.viewNumber
 	}
 	// 0. Update most recently seen viewchange message from this node
-	n.viewChange.messages[message.Node] = *message
+	n.viewChange.messages[vc.Node] = *message
 	// 1. If a replica receives a set of f+1 valid view change messages
 	// from other replicas for views higher than its current view...
-	if message.ViewNumber > currentView {
+	if vc.ViewNumber > currentView {
 		higherThanCurrent := 0
-		lowestNewView := message.ViewNumber
+		lowestNewView := vc.ViewNumber
 		for _, msg := range n.viewChange.messages {
-			if msg.ViewNumber > currentView {
+			if msg.Message.ViewNumber > currentView {
 				higherThanCurrent += 1
-				if msg.ViewNumber < lowestNewView {
-					lowestNewView = msg.ViewNumber
+				if msg.Message.ViewNumber < lowestNewView {
+					lowestNewView = msg.Message.ViewNumber
 				}
 			}
 		}
@@ -46,24 +57,23 @@ func (n *PBFTNode) handleViewChange(message *ViewChange) {
 	// Paper: 4.4
 	// When the primary p of view v + 1 receives 2f valid view-change messages
 	// for view v + 1, it multicasts NEW-VIEW.
-	// < And then it does a bunch of stuff I haven't read through yet >
 	// Then it /enters/ view v+1: at this point it is able to accept messages for
 	// view v + 1.
 	// 0. If no new view change was started, and I'm the leader of this view change
-	if n.viewChange.inProgress && n.cluster.LeaderFor(message.ViewNumber) == n.id {
+	if n.viewChange.inProgress && n.cluster.LeaderFor(vc.ViewNumber) == n.id {
 		// 1. See if we got 2f view-change messages for this view!
 		votes := 0
 		for _, msg := range n.viewChange.messages {
-			if msg.ViewNumber == message.ViewNumber {
+			if msg.Message.ViewNumber == vc.ViewNumber {
 				votes += 1
 			}
 		}
 		// 2. If so, multicast new-view (heartbeat)
 		if votes >= (2 * len(n.peermap) / 3) {
 			newview := NewView{
-				ViewNumber:  message.ViewNumber,
+				ViewNumber:  vc.ViewNumber,
 				ViewChanges: n.viewChange.messages,
-				PrePrepares: n.generatePrepreparesForNewView(message.ViewNumber),
+				PrePrepares: n.generatePrepreparesForNewView(vc.ViewNumber),
 				Node:        n.id,
 			}
 			n.newView = &newview
@@ -72,24 +82,36 @@ func (n *PBFTNode) handleViewChange(message *ViewChange) {
 				n.caughtUp[p] = 0
 			}
 			n.caughtUpMux.Unlock()
-			n.enterNewView(message.ViewNumber)
+			n.enterNewView(vc.ViewNumber)
 			n.sendHeartbeat()
 		}
 	}
 }
 
-func (n *PBFTNode) handleNewView(message *NewView) {
+func (n *PBFTNode) handleNewView(message *SignedNewView) {
 	// Paper: section 4.4
 	// A backup accepts a new-view message for view v+1 if it is signed
 	// properly, if the view-change messages it contains are valid for view v+1,
 	// and if the set O is correct. It multicasts prepares for each
 	// message in O, and enters view + 1
+	/*
+		sender, err := message.SignatureValid(n.peerEntities, n.peerEntityMap)
+		if err != nil {
+			n.Log("Validating NewView signature: " + err.Error())
+			return
+		} else if sender != message.Message.Node {
+			n.Log("Error: received NewView not signed by correct sending node")
+			return
+		}
+	*/
+
 	var currentView int
+	newViewMessage := message.Message
 	if n.viewChange.inProgress {
-		if message.ViewNumber == n.viewChange.viewNumber {
-			n.enterNewView(message.ViewNumber)
-			for _, preprepare := range message.PrePrepares {
-				if preprepare.PrePrepareMessage.Number.SeqNumber > n.sequenceNumber {
+		if newViewMessage.ViewNumber == n.viewChange.viewNumber {
+			n.enterNewView(newViewMessage.ViewNumber)
+			for _, preprepare := range newViewMessage.PrePrepares {
+				if preprepare.SignedMessage.PrePrepareMessage.Number.SeqNumber > n.sequenceNumber {
 					n.handlePrePrepare(&preprepare)
 				}
 			}
@@ -100,12 +122,12 @@ func (n *PBFTNode) handleNewView(message *NewView) {
 		currentView = n.viewNumber
 	}
 	// TODO: validate everything correctly
-	if message.ViewNumber > currentView {
+	if newViewMessage.ViewNumber > currentView {
 		// Multicast prepares for each message in O
 		// and enter view + 1
-		n.enterNewView(message.ViewNumber)
-		for _, preprepare := range message.PrePrepares {
-			if preprepare.PrePrepareMessage.Number.SeqNumber > n.sequenceNumber {
+		n.enterNewView(newViewMessage.ViewNumber)
+		for _, preprepare := range newViewMessage.PrePrepares {
+			if preprepare.SignedMessage.PrePrepareMessage.Number.SeqNumber > n.sequenceNumber {
 				n.handlePrePrepare(&preprepare)
 			}
 		}
@@ -118,7 +140,6 @@ func (n *PBFTNode) generateProofsSinceCheckpoint() map[SlotId]PreparedProof {
 		if n.lastCheckpoint.Number.Before(id) && n.isPrepared(slot) {
 			proofs[id] = PreparedProof{
 				Number:        id,
-				Request:       *slot.request,
 				RequestDigest: slot.requestDigest,
 				Preprepare:    *slot.preprepare,
 				Prepares:      slot.prepares,
@@ -153,10 +174,17 @@ func (n *PBFTNode) startViewChange(view int) {
 		Proofs:          n.generateProofsSinceCheckpoint(),
 		Node:            n.id,
 	}
+
+	signedMessage, err := message.Sign(n.entity)
+	if err != nil {
+		n.Log("Signing view change: " + err.Error())
+		return
+	}
+
 	// TODO (sydli): instead of stopping this timer, use it for exponential backoff && to
 	// re-transmit
 	n.stopTimers()
-	go broadcast(n.id, n.peermap, "PBFTNode.ViewChange", n.cluster.Endpoint, &message, time.Duration(100*time.Millisecond))
+	go broadcast(n.id, n.peermap, "PBFTNode.ViewChange", n.cluster.Endpoint, &signedMessage, time.Duration(100*time.Millisecond))
 }
 
 func (n *PBFTNode) enterNewView(view int) {
@@ -170,7 +198,7 @@ func (n *PBFTNode) enterNewView(view int) {
 	n.startTimers()
 }
 
-func (n PBFTNode) ViewChange(req *ViewChange, res *Ack) error {
+func (n PBFTNode) ViewChange(req *SignedViewChange, res *Ack) error {
 	if n.down {
 		return errors.New("I'm down")
 	}
@@ -178,7 +206,7 @@ func (n PBFTNode) ViewChange(req *ViewChange, res *Ack) error {
 	return nil
 }
 
-func (n PBFTNode) NewView(req *NewView, res *Ack) error {
+func (n PBFTNode) NewView(req *SignedNewView, res *Ack) error {
 	if n.down {
 		return errors.New("I'm down")
 	}
@@ -203,7 +231,7 @@ func (n PBFTNode) NewView(req *NewView, res *Ack) error {
 //       Primary creates Pre-prepare with a no-op message.
 // Then the primary appends the messages in O to its log.
 // Then enters new view.
-func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]PrePrepareFull {
+func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]FullPrePrepare {
 	// 1. The primary determines the sequence number min-s of the
 	//    latest stable checkpoint in V and the highest sequence
 	//    number max-s in a prepare message in V.
@@ -212,10 +240,10 @@ func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]PrePrepare
 	seqNums := make(map[int]requestView)
 	for _, viewChange := range n.viewChange.messages {
 		// 1a. Get the latest stable checkpoint in V
-		if viewChange.Checkpoint.SeqNumber > minS {
-			minS = viewChange.Checkpoint.SeqNumber
+		if viewChange.Message.Checkpoint.SeqNumber > minS {
+			minS = viewChange.Message.Checkpoint.SeqNumber
 		}
-		for num, prepareproof := range viewChange.Proofs {
+		for num, prepareproof := range viewChange.Message.Proofs {
 			// 1b. Get the highest sequence number in any prepare message.
 			//     We also want to record the ClientRequest messages
 			//     for all the sequence numbers (we choose the ones with
@@ -223,7 +251,6 @@ func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]PrePrepare
 			reqInfo := requestView{
 				view:          num.ViewNumber,
 				requestDigest: prepareproof.RequestDigest,
-				request:       prepareproof.Request,
 			}
 			if prevReqInfo, ok := seqNums[num.SeqNumber]; ok {
 				// if it exists, only replace if this one has a higher viewnum
@@ -242,7 +269,7 @@ func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]PrePrepare
 	n.Log("sending prepares for messages between %d and %d", minS, maxS)
 	// 2. The primary creates a new pre-prepare message for view
 	//    v+1 for each sequence number n between min-s and max-s.
-	preprepares := make(map[SlotId]PrePrepareFull)
+	preprepares := make(map[SlotId]FullPrePrepare)
 	if minS < maxS {
 		for s := minS; s <= maxS; s++ {
 			slotId := SlotId{
@@ -271,22 +298,25 @@ func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]PrePrepare
 				requestDigest = emptyRequestDigest
 
 			}
-			preprepare := PrePrepareFull{
-				PrePrepareMessage: PrePrepare{
-					Number:        slotId,
-					RequestDigest: requestDigest,
-					Digest:        [sha256.Size]byte{},
-				},
-				Request: request,
+			message := PrePrepare{
+				Number:        slotId,
+				RequestDigest: requestDigest,
 			}
-			preprepare.PrePrepareMessage.SetDigest()
+			signedMessage, err := message.Sign(n.entity)
+			if err != nil {
+				n.Error("Error signing preprepares on view change: " + err.Error())
+			}
+			preprepare := FullPrePrepare{
+				SignedMessage: *signedMessage,
+				Request:       request,
+			}
 			preprepares[slotId] = preprepare
 			n.log[slotId] = &Slot{
 				request:       &request,
 				requestDigest: requestDigest,
-				preprepare:    &preprepare.PrePrepareMessage,
-				prepares:      make(map[NodeId]Prepare),
-				commits:       make(map[NodeId]*Commit),
+				preprepare:    &preprepare.SignedMessage,
+				prepares:      make(map[NodeId]SignedPrepare),
+				commits:       make(map[NodeId]*SignedCommit),
 				prepared:      false,
 				committed:     false,
 			}

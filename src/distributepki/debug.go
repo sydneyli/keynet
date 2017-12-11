@@ -3,9 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	// "distributepki/clientapi"
-	"time"
-	//"distributepki/keystore"
 	"distributepki/util"
 	"encoding/json"
 	"errors"
@@ -16,6 +13,7 @@ import (
 	"pbft"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func sendDebugMessage(cluster *pbft.ClusterConfig, node *pbft.NodeConfig, msg pbft.DebugMessage) {
