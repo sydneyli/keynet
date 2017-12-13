@@ -23,13 +23,18 @@ each replica communicates with its peers over RPC as well. In picture form:
                        +----------------------+             +----------+
 ```
 
+## Authority server
+
+Make sure to spin up the mock authority server before using the cluster, which
+signs off on initial domain<=>key pairings.  Go to `mock_authority`,
+`go get && go build`, and `./mock_authority`.
+
 ## PBFT Setup
 
 Setting up the PBFT cluster requires two configuration files to configure the
 member nodes/prime the keystore for use. The cluster members are statically
 assigned using a json file in this format:
 
-TODO: rename rpcport to something that makes sense
 ```
 {
     "endpoint": "pbft",
@@ -37,28 +42,30 @@ TODO: rename rpcport to something that makes sense
         {
             "id": 1,
             "hostname": "<host1>",
-            "port": <port>,
-            "rpcport": <external port>,
-            "key": "<node 1 key>",
-            "primary": true
+            "port": <port for internal messages>,
+            "clientport": <external port>,
+            "publickeyfile": <location of public pgp key>,
+            "privatekeyfile": <location of secret pgp key>,
+            "passphrasefile": <location of secret for key>,
         },
         {
             "id": 2,
             "hostname": "<host2>",
             "port": <port2>,
-            "rpcport": <external port2>,
-            "key": "<node 2 key>",
-            "primary": false
+            "clientport": <external port2>,
+            "publickeyfile": <location of public pgp key>,
+            "privatekeyfile": <location of secret pgp key>,
+            "passphrasefile": <location of secret for key>,
         },
         ...
     ]
 }
 ```
 
-There should only be one primary node, and each node must have their own PGP
-key pair, the public one specified in the cluster configuration. In addition,
-any nodes that are authorized to add new public keys for their domains should
-be included in a json file to initialize the key store:
+Each node must have their own PGP key pair, the public one specified in the
+cluster configuration. In addition, any nodes that are authorized to add new
+public keys for their domains should be included in a json file to initialize
+the key store:
 
 ```
 [
@@ -70,8 +77,12 @@ be included in a json file to initialize the key store:
 ]
 ```
 
-Finally, to start up the cluster of `n` nodes acording to `cluster.json`, run
- `./distributepki -cluster`.
+To build, run `go get && go build` in `/distributepki`.
+
+To start up a local cluster of `n` nodes acording to `cluster.json`, run
+ `./distributepki -cluster`. To start one machine at a time, run `./distributepki -id <id>`.
+You can also configure which config file to use using `-config <cluster config file>`.
+Make sure the auth server is running!
 
 ## Debugging
 If you enable debugging on your cluster (on by default right now), you can
@@ -84,37 +95,37 @@ REPL supports the following commands:
   * `up <id>`                  brings the node with the specified id back up
   * `exit`                     quits the repl
 
+## Testing
+
+Run `go test` to test the cluster. Make sure the auth server is running!
+
 ## Client usage
 
-To start up the client server, go to the `client/` directory and run `./client
---config ../distributepki/cluster.json`.
+Currently, to look up a key initially inserted into the table, our cluster
+uses the following HTTP API:
 
-Currently, to look up a key initially inserted into the table, run the
-following curl command:
 ```
-curl -L http://localhost:<cluster node HTTP port>?name=<desired alias>
+Updates: PUT /:
+  request body: {
+    Alias:     <name to update>,
+    Key:       <key to issue>,
+    Timestamp: <time of operation>,
+    Signature: <signature on operation with previous key>
+  }
+Creates: POST /:
+  request body: {
+    Alias:     <name to update>,
+    Key:       <key to issue>,
+    Timestamp: <time of operation>,
+    Signature: <signature on operation by an authority>
+  }
+Lookups:  GET /?name=<desired alias>
 ```
-or POST to `http://localhost:<HTTP port>?name=<desired key>` with the request
-body as the value you want to set the key.
 
-Depending on the current status of the project, that may not work.
-
-## TODO:
-
-*this* means we're working on it
-
-### core functionality
- - [X] Actually sign and verify reads
- - [X] Catch up nodes properly (piggybacking entries on heartbeats
-       and re-preparing non-checkpointed entries)
- - [X] View changes on client request timeout & on heartbeat timeout
- - [X] Checkpointing (sydli)
-
-### not core, but also important
- - [ ] *Check for resource leaks* (sydli)
- - [X] tests?? l0l
- - [ ] moar tests
- - [ ] Reuse RPC connections
+So you can run `curl -L http://<cluster host>:<cluster node HTTP port>?name=<desired alias>`
+to perform lookups,
+or PUT/POST to `http://<cluster host>:<HTTP port>?name=<desired key>` with the request
+body as defined above.
 
 # Implementation details
 We mostly follow the design sketched out in the original PBFT paper, with a couple
@@ -137,7 +148,6 @@ and have all nodes piggyback state information onto heartbeat messages. A node's
 response to the heartbeat can be its own most recently committed sequence number,
 so the primary knows what preprepares to rebroadcast to the node.
 
-### client/demo: colin
- - [ ] CRX
- - [ ] spin up mock cluster/email servers
-
+## TODO:
+ - [ ] moar tests
+ - [ ] Reuse RPC connections
