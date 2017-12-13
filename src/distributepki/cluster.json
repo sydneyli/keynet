@@ -46,6 +46,24 @@
             "publickeyfile": "public/node5.pub",
             "privatekeyfile": "private/node5.key",
             "passphrasefile": "private/passphrase.txt"
+        },
+        {
+            "id": 6,
+            "host": "localhost",
+            "port": 20006,
+            "clientport": 9025,
+            "publickeyfile": "public/node6.pub",
+            "privatekeyfile": "private/node6.key",
+            "passphrasefile": "private/passphrase.txt"
+        },
+        {
+            "id": 7,
+            "host": "localhost",
+            "port": 20007,
+            "clientport": 9026,
+            "publickeyfile": "public/node7.pub",
+            "privatekeyfile": "private/node7.key",
+            "passphrasefile": "private/passphrase.txt"
         }
     ]
 }

@@ -719,7 +719,7 @@ func (n *PBFTNode) sendHeartbeat() {
 					if err != nil {
 						n.Log("Error validating heartbeat signature: " + err.Error())
 					} else if respId != id {
-						n.Log("Error: heartbeat signed by wrong node")
+						n.Log("Error: heartbeat signed by wrong node %d", respId)
 					} else {
 						n.caughtUpMux.Lock()
 						n.caughtUp[id] = response.Response.SeqNumber

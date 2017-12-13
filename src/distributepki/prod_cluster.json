@@ -16,8 +16,8 @@
             "host": "35.197.92.99",
             "port": 20000,
             "clientport": 9020,
-            "publickeyfile": "public/node1.pub",
-            "privatekeyfile": "private/node1.key",
+            "publickeyfile": "public/node2.pub",
+            "privatekeyfile": "private/node2.key",
             "passphrasefile": "private/passphrase.txt"
         },
         {
@@ -25,8 +25,8 @@
             "host": "104.196.247.231",
             "port": 20000,
             "clientport": 9020,
-            "publickeyfile": "public/node1.pub",
-            "privatekeyfile": "private/node1.key",
+            "publickeyfile": "public/node3.pub",
+            "privatekeyfile": "private/node3.key",
             "passphrasefile": "private/passphrase.txt"
         },
         {
@@ -34,8 +34,8 @@
             "host": "104.196.139.156",
             "port": 20000,
             "clientport": 9020,
-            "publickeyfile": "public/node1.pub",
-            "privatekeyfile": "private/node1.key",
+            "publickeyfile": "public/node4.pub",
+            "privatekeyfile": "private/node4.key",
             "passphrasefile": "private/passphrase.txt"
         },
         {
@@ -43,8 +43,8 @@
             "host": "35.227.184.100",
             "port": 20000,
             "clientport": 9020,
-            "publickeyfile": "public/node1.pub",
-            "privatekeyfile": "private/node1.key",
+            "publickeyfile": "public/node5.pub",
+            "privatekeyfile": "private/node5.key",
             "passphrasefile": "private/passphrase.txt"
         },
         {
@@ -52,8 +52,8 @@
             "host": "35.196.82.1",
             "port": 20000,
             "clientport": 9020,
-            "publickeyfile": "public/node1.pub",
-            "privatekeyfile": "private/node1.key",
+            "publickeyfile": "public/node6.pub",
+            "privatekeyfile": "private/node6.key",
             "passphrasefile": "private/passphrase.txt"
         },
         {
@@ -61,8 +61,8 @@
             "host": "35.193.255.159",
             "port": 20000,
             "clientport": 9020,
-            "publickeyfile": "public/node1.pub",
-            "privatekeyfile": "private/node1.key",
+            "publickeyfile": "public/node7.pub",
+            "privatekeyfile": "private/node7.key",
             "passphrasefile": "private/passphrase.txt"
         },
         {
@@ -70,8 +70,8 @@
             "host": "35.203.162.2",
             "port": 20000,
             "clientport": 9020,
-            "publickeyfile": "public/node1.pub",
-            "privatekeyfile": "private/node1.key",
+            "publickeyfile": "public/node8.pub",
+            "privatekeyfile": "private/node8.key",
             "passphrasefile": "private/passphrase.txt"
         },
         {
@@ -79,8 +79,8 @@
             "host": "35.227.70.242",
             "port": 20000,
             "clientport": 9020,
-            "publickeyfile": "public/node1.pub",
-            "privatekeyfile": "private/node1.key",
+            "publickeyfile": "public/node9.pub",
+            "privatekeyfile": "private/node9.key",
             "passphrasefile": "private/passphrase.txt"
         },
         {
@@ -88,8 +88,8 @@
             "host": "35.225.28.234",
             "port": 20000,
             "clientport": 9020,
-            "publickeyfile": "public/node1.pub",
-            "privatekeyfile": "private/node1.key",
+            "publickeyfile": "public/node10.pub",
+            "privatekeyfile": "private/node10.key",
             "passphrasefile": "private/passphrase.txt"
         }
     ]
