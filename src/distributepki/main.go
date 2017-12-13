@@ -80,7 +80,7 @@ func main() {
 	initialKeyTable := LoadInitialKeys(*keystoreFile, &config)
 
 	if *cluster {
-		StartCluster(&initialKeyTable, &config, make(chan bool), *debug)
+		StartCluster(&initialKeyTable, &config, make(chan struct{}), *debug)
 	} else if *debug {
 		StartDebugRepl(&config)
 	} else {
@@ -88,7 +88,7 @@ func main() {
 	}
 }
 
-func StartCluster(initialKeyTable *map[string]string, cluster *pbft.ClusterConfig, shutdown chan bool, debug bool) {
+func StartCluster(initialKeyTable *map[string]string, cluster *pbft.ClusterConfig, shutdown chan struct{}, debug bool) {
 	var nodeProcesses []*exec.Cmd
 	for _, n := range cluster.Nodes {
 		id := n.Id

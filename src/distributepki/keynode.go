@@ -173,7 +173,7 @@ func handlerWithContext(kn *KeyNode) func(http.ResponseWriter, *http.Request) {
 }
 
 func (kn *KeyNode) waitForCommit(op *clientapi.KeyOperation, w *http.ResponseWriter) {
-	responseChan := make(chan string)
+	responseChan := make(chan string, 100)
 	kn.pendingRequests.Store(op.Digest, responseChan)
 	kn.logger.Infof("Store pending request with digest: %v", op.Digest)
 

@@ -141,6 +141,7 @@ func (n *PBFTNode) generateProofsSinceCheckpoint() map[SlotId]PreparedProof {
 			proofs[id] = PreparedProof{
 				Number:        id,
 				RequestDigest: slot.requestDigest,
+				Request:       *slot.request,
 				Preprepare:    *slot.preprepare,
 				Prepares:      slot.prepares,
 			}
@@ -250,6 +251,7 @@ func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]FullPrePre
 			//     the highest view numbers), for part (2).
 			reqInfo := requestView{
 				view:          num.ViewNumber,
+				request:       prepareproof.Request,
 				requestDigest: prepareproof.RequestDigest,
 			}
 			if prevReqInfo, ok := seqNums[num.SeqNumber]; ok {
@@ -280,7 +282,7 @@ func (n *PBFTNode) generatePrepreparesForNewView(view int) map[SlotId]FullPrePre
 			var requestDigest [sha256.Size]byte
 			emptyRequestDigest, err := util.GenerateDigest("")
 			if err != nil {
-				n.Error(" OH SHIT DIGEST EMPTY??? ")
+				n.Error("Message is empty! How did we not generate a digest?")
 			}
 			//    There are two cases:
 			if reqInfo, ok := seqNums[s]; ok {
