@@ -55,9 +55,6 @@ type PBFTNode struct {
 	// Requests: did they finish yet?
 	requests map[[sha256.Size]byte]requestInfo
 
-	// local key grabbing hack
-	KeyRequest chan *KeyRequest // hostname
-
 	//////
 	// The below are all mutable, but writes should ALWAYS
 	// happen on the main routine unless otherwise indicated.
@@ -126,16 +123,11 @@ type viewChangeInfo struct {
 	viewNumber int
 }
 
-type KeyRequest struct {
-	Hostname string
-	Reply    chan *string
-}
-
 // Heartbeat ticker
-const TIMEOUT time.Duration = time.Duration(1 * time.Second)
+const TIMEOUT time.Duration = time.Duration(500 * time.Millisecond)
 
 // How many sequence numbers to wait before checkpointing
-const CHECKPOINT uint = 3
+const CHECKPOINT uint = 100
 
 // Entry point for each PBFT node.
 // NodeConfig: configuration for this node
@@ -288,18 +280,6 @@ func (n *PBFTNode) ensureMapping(num SlotId) *Slot {
 	return slot
 }
 
-func (n PBFTNode) keyFor(hostname string) (*string, error) {
-	request := KeyRequest{
-		Hostname: hostname,
-		Reply:    make(chan *string),
-	}
-	n.KeyRequest <- &request
-	if response := <-request.Reply; response != nil {
-		return response, nil
-	}
-	return nil, errors.New("eft, no key")
-}
-
 func (n PBFTNode) isPrimary() bool {
 	return n.cluster.LeaderFor(n.viewNumber) == n.id
 }
@@ -414,22 +394,7 @@ func (n *PBFTNode) handleClientRequest(request *string) {
 		go n.broadcast("PBFTNode.PrePrepare", &fullMessage, 0)
 	} else {
 		// forward to all ma frandz if im not da leader
-		// TODO: they should probably just forward it to the leader
 		go n.broadcast("PBFTNode.ClientRequest", request, 0)
-		// primaryId, primaryHostname := n.getPrimary()
-		// n.Log("primary id: %d", primaryId)
-		// go sendRpc(n.id, primaryId, primaryHostname, "PBFTNode.ClientRequest", n.cluster.Endpoint, request, nil, 5)
-
-		// TODO: do some sort of timeout for a view change
-		/*
-			// start execution timer...
-			go func(n *PBFTNode) {
-				<-time.After(TIMEOUT)
-				if !n.requests[request.Id].committed {
-					n.requestTimeoutChannel <- true
-				}
-			}(n)
-		*/
 	}
 }
 
@@ -482,8 +447,6 @@ func (n *PBFTNode) handlePrePrepare(preprepare *FullPrePrepare) {
 
 	slot := n.ensureMapping(preprepareMessage.Number)
 
-	// XXX: assumes that it's correct to NOT resend Prepares if we've already seen or sent the PrePrepare (i.e. request != nil)
-	// TODO (sydli): i think it's ok to re-prepare to catch up other nodes
 	if slot.request != nil {
 		// 4. it has not accepted a pre-prepare message for view v and seq
 		//    num n containing a different digest
@@ -501,8 +464,6 @@ func (n *PBFTNode) handlePrePrepare(preprepare *FullPrePrepare) {
 	slot.request = &preprepare.Request
 	slot.requestDigest = preprepareMessage.RequestDigest
 	slot.preprepare = &preprepare.SignedMessage
-
-	// TODO: iterate through potentially existing Prepare and Commit entries and check hashes, throw away non-matching with warning
 
 	prepare := Prepare{
 		Number:        preprepareMessage.Number,
@@ -680,7 +641,6 @@ func (n *PBFTNode) heartbeatMessage(peerSequence int) (string, interface{}) {
 	}
 }
 
-// TODO (sydli): Clean up the below. It's gross.
 func (n *PBFTNode) sendHeartbeat() {
 	if !n.isPrimary() {
 		return
@@ -745,7 +705,7 @@ func (n *PBFTNode) getTimer() <-chan time.Time {
 }
 
 func (n *PBFTNode) stopTimers() {
-	// TODO: properly close these guys (flush channels):
+	// TODO: Is this an issue?
 	// https://github.com/golang/go/issues/14383
 	if n.timeoutTimer != nil {
 		n.timeoutTimer.Stop()

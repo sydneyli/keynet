@@ -54,21 +54,7 @@ func SpawnKeyNode(config pbft.NodeConfig, cluster *pbft.ClusterConfig, store *ke
 	}
 
 	go keyNode.handleUpdates()
-	go keyNode.serveKeyRequests()
 	return &keyNode
-}
-
-func (kn *KeyNode) serveKeyRequests() {
-	for request := range kn.consensusNode.KeyRequest {
-		s := "testkey"
-		request.Reply <- &s
-		// TODO: finish implementing
-		// if v, ok := kn.store.Get(request.Hostname); ok {
-		// 	request.Reply <- v
-		// } else {
-		// 	request.Reply <- nil
-		// }
-	}
 }
 
 // is there a better way to bind this variable to the inner fn...?

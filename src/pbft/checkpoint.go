@@ -10,7 +10,6 @@ func (n *PBFTNode) checkpointed(checkpoint CheckpointProof) {
 		return
 	}
 	n.lastCheckpoint = checkpoint
-	//n.Log("CHECKPOINT: %+v", n.lastCheckpoint)
 	//flush pending checkpoints
 	var stable []SlotId
 	for slot, _ := range n.pendingCheckpoints {

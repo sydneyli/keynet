@@ -1,0 +1,40 @@
+{
+    "endpoint": "pbft",
+    "nodes": [
+        {
+            "id": 1,
+            "host": "localhost",
+            "port": 20001,
+            "clientport": 9020,
+            "key": "85594f70f00df7308241b5d436d84b1c93b7151b54f7ba0e9cbc8631cc1174b5"
+        },
+        {
+            "id": 2,
+            "host": "localhost",
+            "port": 20002,
+            "clientport": 9021,
+            "key": "1290799ba2ba0ab661732d96f41bfbdab1fbd4f0b13a58d63c19ba2463669bb9"
+        },
+        {
+            "id": 3,
+            "host": "localhost",
+            "port": 20003,
+            "clientport": 9022,
+            "key": "47a64676b07601fc44b7b42491676c6ee9d8d1ad3f7f138e9cfbdfdfe9c71dd2"
+        },
+        {
+            "id": 4,
+            "host": "localhost",
+            "port": 20004,
+            "clientport": 9023,
+            "key": "d80a744b1304332463f6346175e3af33ad3e448fa18ace85208bb95a315b5c2d"
+        },
+        {
+            "id": 5,
+            "host": "localhost",
+            "port": 20005,
+            "clientport": 9024,
+            "key": "fffff770392759864bcf548117c0f9e1af43bf41d2ca6bd9378bce09f5d6c799"
+        }
+    ]
+}

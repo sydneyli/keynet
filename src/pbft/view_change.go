@@ -121,7 +121,6 @@ func (n *PBFTNode) handleNewView(message *SignedNewView) {
 	} else {
 		currentView = n.viewNumber
 	}
-	// TODO: validate everything correctly
 	if newViewMessage.ViewNumber > currentView {
 		// Multicast prepares for each message in O
 		// and enter view + 1

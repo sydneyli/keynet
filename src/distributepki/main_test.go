@@ -89,7 +89,7 @@ func sendDebugMessageToNode(nodeId int, message pbft.DebugMessage) {
 // Simulates a "client get": broadcast to entire cluster and wait for f + 1 responses.
 func clientGet(cluster *pbft.ClusterConfig, alias string) string {
 	finished := make(chan string)
-	for i := 0; i < len(cluster.Nodes); i++ {
+	for i := 0; i < 4; i++ {
 		go func(i int) {
 			_, result := doGet(cluster, &(cluster.Nodes[i]), alias)
 			finished <- result
@@ -97,7 +97,7 @@ func clientGet(cluster *pbft.ClusterConfig, alias string) string {
 	}
 
 	var result string
-	for i := 0; i < (len(cluster.Nodes)/3)+1; i++ {
+	for i := 0; i < (4/3)+1; i++ {
 		result = <-finished
 	}
 	return result
@@ -156,57 +156,57 @@ func TestMain(m *testing.M) {
 
 // ** TESTS START HERE ** //
 
-// func TestNormalOperation(t *testing.T) {
-// 	// assuming node 1 is leader...
-// 	testPutHelper(t, 1, 1)
-// 	testPutHelper(t, 1, 4)
-// 	testPutHelper(t, 3, 4)
-// 	testPutHelper(t, 4, 1)
-// }
-//
-// func TestViewChangeAfterCommit(t *testing.T) {
-// 	alias, key := testPutHelper(t, 3, 4)
-// 	testPutHelper(t, 2, 5)
-// 	sendDebugMessageToNode(1, pbft.DebugMessage{Op: pbft.DOWN})
-// 	<-time.After(3 * time.Second)
-// 	status, result := doGet(&cluster, getNode(2), alias)
-// 	assertEqual(t, status, "200 OK", "")
-// 	assertEqual(t, result, fmt.Sprintf("\"%s\"", key), "")
-// }
-//
-// func TestCommitDuringViewChange(t *testing.T) {
-// 	// 1. Take down leader and wait for view change
-// 	sendDebugMessageToNode(1, pbft.DebugMessage{Op: pbft.DOWN})
-// 	<-time.After(3 * time.Second)
-// 	// 2. Try to persist update
-// 	alias, key := testPutHelper(t, 3, 4)
-// 	testPutHelper(t, 2, 3)
-// 	// 3. Bring node back up
-// 	sendDebugMessageToNode(1, pbft.DebugMessage{Op: pbft.UP})
-// 	<-time.After(3 * time.Second)
-// 	// 4. Did the node catch up properly?
-// 	status, result := doGet(&cluster, getNode(1), alias)
-// 	assertEqual(t, status, "200 OK", "")
-// 	assertEqual(t, result, fmt.Sprintf("\"%s\"", key), "")
-// }
-//
-// func TestBackupCatchesUp(t *testing.T) {
-// 	// 1. Take down a backup node.
-// 	sendDebugMessageToNode(3, pbft.DebugMessage{Op: pbft.DOWN})
-// 	// 2. Commit a value without them.
-// 	alias, key := testPutHelper(t, 2, 4)
-// 	// 3. Bring node back.
-// 	sendDebugMessageToNode(3, pbft.DebugMessage{Op: pbft.UP})
-// 	<-time.After(time.Second)
-// 	// 4. Do they catch up?
-// 	status, result := doGet(&cluster, getNode(3), alias)
-// 	assertEqual(t, status, "200 OK", "")
-// 	assertEqual(t, result, fmt.Sprintf("\"%s\"", key), "")
-// }
-//
-// func TestConcurrentWrites(t *testing.T) {
-// 	concurrentPutHelper(t, 5)
-// }
+func TestNormalOperation(t *testing.T) {
+	// assuming node 1 is leader...
+	testPutHelper(t, 1, 1)
+	testPutHelper(t, 1, 4)
+	testPutHelper(t, 3, 4)
+	testPutHelper(t, 4, 1)
+}
+
+func TestViewChangeAfterCommit(t *testing.T) {
+	alias, key := testPutHelper(t, 3, 4)
+	testPutHelper(t, 2, 5)
+	sendDebugMessageToNode(1, pbft.DebugMessage{Op: pbft.DOWN})
+	<-time.After(3 * time.Second)
+	status, result := doGet(&cluster, getNode(2), alias)
+	assertEqual(t, status, "200 OK", "")
+	assertEqual(t, result, fmt.Sprintf("\"%s\"", key), "")
+}
+
+func TestCommitDuringViewChange(t *testing.T) {
+	// 1. Take down leader and wait for view change
+	sendDebugMessageToNode(1, pbft.DebugMessage{Op: pbft.DOWN})
+	<-time.After(3 * time.Second)
+	// 2. Try to persist update
+	alias, key := testPutHelper(t, 3, 4)
+	testPutHelper(t, 2, 3)
+	// 3. Bring node back up
+	sendDebugMessageToNode(1, pbft.DebugMessage{Op: pbft.UP})
+	<-time.After(3 * time.Second)
+	// 4. Did the node catch up properly?
+	status, result := doGet(&cluster, getNode(1), alias)
+	assertEqual(t, status, "200 OK", "")
+	assertEqual(t, result, fmt.Sprintf("\"%s\"", key), "")
+}
+
+func TestBackupCatchesUp(t *testing.T) {
+	// 1. Take down a backup node.
+	sendDebugMessageToNode(3, pbft.DebugMessage{Op: pbft.DOWN})
+	// 2. Commit a value without them.
+	alias, key := testPutHelper(t, 2, 4)
+	// 3. Bring node back.
+	sendDebugMessageToNode(3, pbft.DebugMessage{Op: pbft.UP})
+	<-time.After(time.Second)
+	// 4. Do they catch up?
+	status, result := doGet(&cluster, getNode(3), alias)
+	assertEqual(t, status, "200 OK", "")
+	assertEqual(t, result, fmt.Sprintf("\"%s\"", key), "")
+}
+
+func TestConcurrentWrites(t *testing.T) {
+	concurrentPutHelper(t, 5)
+}
 
 // ** BENCHMARKING ** //
 
@@ -268,20 +268,58 @@ func benchmarkPuts(b *testing.B, cluster *pbft.ClusterConfig) {
 
 func BenchmarkLocalGets(b *testing.B) {
 	thisCluster := getCluster(5)
-	doBenchmark(b, thisCluster, benchmarkGets(b, thisCluster))
+	doBenchmark(b, thisCluster, benchmarkGets)
 }
 
 func BenchmarkLocalPuts(b *testing.B) {
 	thisCluster := getCluster(5)
-	doBenchmark(b, thisCluster, benchmarkPuts(b, thisCluster))
+	doBenchmark(b, thisCluster, benchmarkPuts)
 }
 
 func BenchmarkRemoteGets(b *testing.B) {
 	remoteCluster := LoadConfig("prod_cluster.json")
-	doBenchmark(b, remoteCluster, benchmarkGets)
+	benchmarkGets(b, &remoteCluster)
 }
 
 func BenchmarkRemotePuts(b *testing.B) {
 	remoteCluster := LoadConfig("prod_cluster.json")
-	doBenchmark(b, remoteCluster, benchmarkPuts)
+	benchmarkPuts(b, &remoteCluster)
+}
+
+func BenchmarkRemotePuts(b *testing.B) {
+	remoteCluster := LoadConfig("prod_cluster.json")
+	benchmarkPuts(b, &remoteCluster)
+}
+
+//
+func benchmarkWithIntermittentFailures(b *testing.B, cluster *pbft.ClusterConfig, benchmark func(*testing.B, *pbft.ClusterConfig)) {
+	done := make(chan struct{})
+	go func(done chan struct{}, cluster pbft.ClusterConfig) {
+		ticker := time.NewTicker(time.Millisecond * 2000)
+		down := 1
+
+		select {
+		case <-done:
+		case <-ticker.C:
+			sendDebugMessageToNode(down, pbft.DebugMessage{Op: pbft.UP})
+			down = int(cluster.Nodes[rand.Intn(len(cluster.Nodes))].Id)
+			sendDebugMessageToNode(down, pbft.DebugMessage{Op: pbft.DOWN})
+		}
+	}(done, *cluster)
+	benchmark(b, cluster)
+	defer func() { done <- struct{}{} }()
+}
+
+func BenchmarkPutDuringIntermittentFailures(b *testing.B) {
+	thisCluster := getCluster(5)
+	doBenchmark(b, thisCluster, func(*testing.B, *pbft.ClusterConfig) {
+		benchmarkWithIntermittentFailures(b, cluster, benchmarkPuts)
+	})
+}
+
+func BenchmarkGetDuringIntermittentFailures(b *testing.B) {
+	thisCluster := getCluster(5)
+	doBenchmark(b, thisCluster, func(*testing.B, *pbft.ClusterConfig) {
+		benchmarkWithIntermittentFailures(b, cluster, benchmarkGets)
+	})
 }
