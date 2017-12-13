@@ -1,0 +1,96 @@
+{
+    "endpoint": "pbft",
+    "authoritykeyfile": "../mock_authority/keys/public.key",
+    "nodes": [
+        {
+            "id": 1,
+            "host": "35.224.150.124",
+            "port": 20000,
+            "clientport": 9020,
+            "publickeyfile": "public/node1.pub",
+            "privatekeyfile": "private/node1.key",
+            "passphrasefile": "private/passphrase.txt"
+        },
+        {
+            "id": 2,
+            "host": "35.197.92.99",
+            "port": 20000,
+            "clientport": 9020,
+            "publickeyfile": "public/node1.pub",
+            "privatekeyfile": "private/node1.key",
+            "passphrasefile": "private/passphrase.txt"
+        },
+        {
+            "id": 3,
+            "host": "104.196.247.231",
+            "port": 20000,
+            "clientport": 9020,
+            "publickeyfile": "public/node1.pub",
+            "privatekeyfile": "private/node1.key",
+            "passphrasefile": "private/passphrase.txt"
+        },
+        {
+            "id": 6,
+            "host": "104.196.139.156",
+            "port": 20000,
+            "clientport": 9020,
+            "publickeyfile": "public/node1.pub",
+            "privatekeyfile": "private/node1.key",
+            "passphrasefile": "private/passphrase.txt"
+        },
+        {
+            "id": 4,
+            "host": "35.227.184.100",
+            "port": 20000,
+            "clientport": 9020,
+            "publickeyfile": "public/node1.pub",
+            "privatekeyfile": "private/node1.key",
+            "passphrasefile": "private/passphrase.txt"
+        },
+        {
+            "id": 7,
+            "host": "35.196.82.1",
+            "port": 20000,
+            "clientport": 9020,
+            "publickeyfile": "public/node1.pub",
+            "privatekeyfile": "private/node1.key",
+            "passphrasefile": "private/passphrase.txt"
+        },
+        {
+            "id": 9,
+            "host": "35.193.255.159",
+            "port": 20000,
+            "clientport": 9020,
+            "publickeyfile": "public/node1.pub",
+            "privatekeyfile": "private/node1.key",
+            "passphrasefile": "private/passphrase.txt"
+        },
+        {
+            "id": 5,
+            "host": "35.203.162.2",
+            "port": 20000,
+            "clientport": 9020,
+            "publickeyfile": "public/node1.pub",
+            "privatekeyfile": "private/node1.key",
+            "passphrasefile": "private/passphrase.txt"
+        },
+        {
+            "id": 8,
+            "host": "35.227.70.242",
+            "port": 20000,
+            "clientport": 9020,
+            "publickeyfile": "public/node1.pub",
+            "privatekeyfile": "private/node1.key",
+            "passphrasefile": "private/passphrase.txt"
+        },
+        {
+            "id": 10,
+            "host": "35.225.28.234",
+            "port": 20000,
+            "clientport": 9020,
+            "publickeyfile": "public/node1.pub",
+            "privatekeyfile": "private/node1.key",
+            "passphrasefile": "private/passphrase.txt"
+        }
+    ]
+}

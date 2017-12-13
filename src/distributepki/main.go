@@ -37,6 +37,16 @@ func LoadConfig(filename string) pbft.ClusterConfig {
 	return config
 }
 
+func LoadConfigSubset(filename string, num int) pbft.ClusterConfig {
+	config := LoadConfig(filename)
+	config.Nodes = config.Nodes[0:num]
+	return pbft.ClusterConfig{
+		Nodes:            config.Nodes[0:num],
+		AuthorityKeyFile: config.AuthorityKeyFile,
+		Endpoint:         config.Endpoint,
+	}
+}
+
 func LoadInitialKeys(filename string, config *pbft.ClusterConfig) map[string]string {
 	log.Infof("Reading initial keys from %s...", filename)
 
@@ -66,6 +76,7 @@ func main() {
 
 	configFile := flag.String("config", "cluster.json", "PBFT configuration file")
 	cluster := flag.Bool("cluster", false, "Bootstrap entire cluster")
+	num := flag.Int("num", 0, "Subset of cluster")
 	debug := flag.Bool("debug", false, "with cluster flag, enables debugging. without cluster flag, starts debugging repl")
 	id := flag.Int("id", 1, "Node ID to start")
 	keystoreFile := flag.String("keys", "keys.json", "Initial keys in store")
@@ -75,8 +86,12 @@ func main() {
 	gob.Register(clientapi.Create{})
 	gob.Register(clientapi.Update{})
 	gob.Register(clientapi.Lookup{})
-
-	config := LoadConfig(*configFile)
+	var config pbft.ClusterConfig
+	if *num == 0 {
+		config = LoadConfig(*configFile)
+	} else {
+		config = LoadConfigSubset(*configFile, *num)
+	}
 	initialKeyTable := LoadInitialKeys(*keystoreFile, &config)
 
 	if *cluster {
@@ -95,7 +110,8 @@ func StartCluster(initialKeyTable *map[string]string, cluster *pbft.ClusterConfi
 		if debug {
 			// TODO (sydli): Take debug flag into account
 		}
-		cmd := exec.Command("./distributepki", "-id", fmt.Sprintf("%d", id))
+		cmd := exec.Command("./distributepki", "-id", fmt.Sprintf("%d", id), "-num",
+			fmt.Sprintf("%d", len(cluster.Nodes)))
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		cmd.Dir = "."

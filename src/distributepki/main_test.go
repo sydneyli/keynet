@@ -86,6 +86,23 @@ func sendDebugMessageToNode(nodeId int, message pbft.DebugMessage) {
 	}
 }
 
+// Simulates a "client get": broadcast to entire cluster and wait for f + 1 responses.
+func clientGet(cluster *pbft.ClusterConfig, alias string) string {
+	finished := make(chan string)
+	for i := 0; i < len(cluster.Nodes); i++ {
+		go func(i int) {
+			_, result := doGet(cluster, &(cluster.Nodes[i]), alias)
+			finished <- result
+		}(i)
+	}
+
+	var result string
+	for i := 0; i < (len(cluster.Nodes)/3)+1; i++ {
+		result = <-finished
+	}
+	return result
+}
+
 func concurrentPutHelper(t *testing.T, concurrent int) {
 	npeers := len(cluster.Nodes)
 	aliases := make([]string, 0)
@@ -237,7 +254,7 @@ func benchmarkGets(b *testing.B, cluster *pbft.ClusterConfig) {
 	doPut(cluster, &(cluster.Nodes[0]), alias, key)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		doGet(cluster, &(cluster.Nodes[0]), alias)
+		clientGet(cluster, alias)
 	}
 }
 
@@ -249,20 +266,16 @@ func benchmarkPuts(b *testing.B, cluster *pbft.ClusterConfig) {
 	}
 }
 
-// func BenchmarkLocalGets(b *testing.B) {
-// 	thisCluster := getCluster(5)
-// 	doBenchmark(b, thisCluster, func(b *testing.B) {
-// 		benchmarkGets(b, thisCluster)
-// 	})
-// }
-//
-// func BenchmarkLocalPuts(b *testing.B) {
-// 	thisCluster := getCluster(5)
-// 	doBenchmark(b, thisCluster, func(b *testing.B) {
-// 		benchmarkPuts(b, thisCluster)
-// 	})
-// }
-//
+func BenchmarkLocalGets(b *testing.B) {
+	thisCluster := getCluster(5)
+	doBenchmark(b, thisCluster, benchmarkGets(b, thisCluster))
+}
+
+func BenchmarkLocalPuts(b *testing.B) {
+	thisCluster := getCluster(5)
+	doBenchmark(b, thisCluster, benchmarkPuts(b, thisCluster))
+}
+
 func BenchmarkRemoteGets(b *testing.B) {
 	remoteCluster := LoadConfig("prod_cluster.json")
 	doBenchmark(b, remoteCluster, benchmarkGets)
@@ -272,6 +285,3 @@ func BenchmarkRemotePuts(b *testing.B) {
 	remoteCluster := LoadConfig("prod_cluster.json")
 	doBenchmark(b, remoteCluster, benchmarkPuts)
 }
-
-// func BenchmarkPuts(b *Testing.B) {
-// }
