@@ -281,10 +281,10 @@ func BenchmarkRemoteGets(b *testing.B) {
 	benchmarkGets(b, &remoteCluster)
 }
 
-func BenchmarkRemotePuts(b *testing.B) {
-	remoteCluster := LoadConfig("prod_cluster.json")
-	benchmarkPuts(b, &remoteCluster)
-}
+// func BenchmarkRemotePuts(b *testing.B) {
+// 	remoteCluster := LoadConfig("prod_cluster.json")
+// 	benchmarkPuts(b, &remoteCluster)
+// }
 
 func BenchmarkRemotePuts(b *testing.B) {
 	remoteCluster := LoadConfig("prod_cluster.json")
@@ -292,34 +292,34 @@ func BenchmarkRemotePuts(b *testing.B) {
 }
 
 //
-func benchmarkWithIntermittentFailures(b *testing.B, cluster *pbft.ClusterConfig, benchmark func(*testing.B, *pbft.ClusterConfig)) {
-	done := make(chan struct{})
-	go func(done chan struct{}, cluster pbft.ClusterConfig) {
-		ticker := time.NewTicker(time.Millisecond * 2000)
-		down := 1
+// func benchmarkWithIntermittentFailures(b *testing.B, cluster *pbft.ClusterConfig, benchmark func(*testing.B, *pbft.ClusterConfig)) {
+// 	done := make(chan struct{})
+// 	go func(done chan struct{}, cluster pbft.ClusterConfig) {
+// 		ticker := time.NewTicker(time.Millisecond * 2000)
+// 		down := 1
 
-		select {
-		case <-done:
-		case <-ticker.C:
-			sendDebugMessageToNode(down, pbft.DebugMessage{Op: pbft.UP})
-			down = int(cluster.Nodes[rand.Intn(len(cluster.Nodes))].Id)
-			sendDebugMessageToNode(down, pbft.DebugMessage{Op: pbft.DOWN})
-		}
-	}(done, *cluster)
-	benchmark(b, cluster)
-	defer func() { done <- struct{}{} }()
-}
+// 		select {
+// 		case <-done:
+// 		case <-ticker.C:
+// 			sendDebugMessageToNode(down, pbft.DebugMessage{Op: pbft.UP})
+// 			down = int(cluster.Nodes[rand.Intn(len(cluster.Nodes))].Id)
+// 			sendDebugMessageToNode(down, pbft.DebugMessage{Op: pbft.DOWN})
+// 		}
+// 	}(done, *cluster)
+// 	benchmark(b, cluster)
+// 	defer func() { done <- struct{}{} }()
+// }
 
-func BenchmarkPutDuringIntermittentFailures(b *testing.B) {
-	thisCluster := getCluster(5)
-	doBenchmark(b, thisCluster, func(*testing.B, *pbft.ClusterConfig) {
-		benchmarkWithIntermittentFailures(b, cluster, benchmarkPuts)
-	})
-}
+// func BenchmarkPutDuringIntermittentFailures(b *testing.B) {
+// 	thisCluster := getCluster(5)
+// 	doBenchmark(b, thisCluster, func(*testing.B, *pbft.ClusterConfig) {
+// 		benchmarkWithIntermittentFailures(b, cluster, benchmarkPuts)
+// 	})
+// }
 
-func BenchmarkGetDuringIntermittentFailures(b *testing.B) {
-	thisCluster := getCluster(5)
-	doBenchmark(b, thisCluster, func(*testing.B, *pbft.ClusterConfig) {
-		benchmarkWithIntermittentFailures(b, cluster, benchmarkGets)
-	})
-}
+// func BenchmarkGetDuringIntermittentFailures(b *testing.B) {
+// 	thisCluster := getCluster(5)
+// 	doBenchmark(b, thisCluster, func(*testing.B, *pbft.ClusterConfig) {
+// 		benchmarkWithIntermittentFailures(b, cluster, benchmarkGets)
+// 	})
+// }
